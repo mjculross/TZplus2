@@ -1,4 +1,5 @@
-TZplus2 - 3 selectable timezones
+TZplus2 - a Pebble watchapp that displays 3
+          selectable timezones
 
 [ SDK 2.0 compatible version ]
 
