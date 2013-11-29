@@ -1,66 +1,83 @@
-#include "pebble_os.h"
-#include "pebble_app.h"
+#include <pebble.h>
 
-#define MY_UUID {0x7d, 0xb5, 0x0a, 0xa2, 0x2b, 0x9d, 0x4f, 0x61, 0x86, 0x44, 0x2e, 0xd7, 0xa5, 0x5f, 0xaf, 0xab}
+static Window *window;
 
-PBL_APP_INFO(MY_UUID,
-	     "TZplus", "Pebble Technology & KD5RXT",
-	     1, 1, /* App major/minor version */
-	     RESOURCE_ID_IMAGE_MENU_ICON,
-//	     APP_INFO_WATCH_FACE);
-	     APP_INFO_STANDARD_APP);
+// This is a custom defined key for saving the display_is_local flag
+#define PKEY_DISPLAY_IS_LOCAL 65432
+#define DISPLAY_IS_LOCAL_DEFAULT true 
 
-Window window;
+// This is a custom defined key for saving the local_index
+#define PKEY_LOCAL_INDEX 26543
+#define LOCAL_INDEX_DEFAULT 20 // local=CDT
 
+// This is a custom defined key for saving the tz1_index
+#define PKEY_TZ1_INDEX 32654
+#define TZ1_INDEX_DEFAULT 27 // New York
 
-#define TOTAL_NAME_IMAGES 7
-#define TOTAL_TIME_IMAGES 7
+// This is a custom defined key for saving the tz2_index
+#define PKEY_TZ2_INDEX 43265
+#define TZ2_INDEX_DEFAULT 38 // London
+
+// This is a custom defined key for saving the tz3_index
+#define PKEY_TZ3_INDEX 54326
+#define TZ3_INDEX_DEFAULT 80 // Tokyo
+
+#define TOTAL_IMAGES 7
 #define SETMODE_SECONDS 20
+#define LIGHT_TIMER_SECONDS 4
 #define SWITCH_SECONDS 4
 #define NUM_TIMEZONES 92
 
 typedef enum {APP_IDLE_STATE = 0, APP_SET_LOCAL_STATE, APP_SET_TZ1_STATE, APP_SET_TZ2_STATE, APP_SET_TZ3_STATE, STATE_COUNT} APP_STATE;
 
-PblTm current_time;
-PblTm previous_time;
-
-PblTm current_time_local;
-PblTm current_time1;
-PblTm current_time2;
-PblTm current_time3;
+struct tm current_time_local;
+struct tm current_time1;
+struct tm current_time2;
+struct tm current_time3;
 
 int setmode_timer = SETMODE_SECONDS;
 int switch_seconds = 0;
+int light_timer = LIGHT_TIMER_SECONDS;
 
 bool toggle_flag = false;
-bool display_is_local = false;
+bool display_is_local = DISPLAY_IS_LOCAL_DEFAULT;
 
-int local_index = 20; // local=CDT
+bool light_on = false;
+
+int local_index = LOCAL_INDEX_DEFAULT;
 int local_offset_hours = 0;
 int local_offset_mins = 0;
 
-int tz1_index = 27; // New York
+int tz1_index = TZ1_INDEX_DEFAULT;
 int tz1_offset_hours = 0;
 int tz1_offset_mins = 0;
 
-int tz2_index = 38; // London
+int tz2_index = TZ2_INDEX_DEFAULT;
 int tz2_offset_hours = 0;
 int tz2_offset_mins = 0;
 
-int tz3_index = 80; // Tokyo
+int tz3_index = TZ3_INDEX_DEFAULT;
 int tz3_offset_hours = 0;
 int tz3_offset_mins = 0;
 
 int app_state = APP_IDLE_STATE;
+int splash_timer = 3;
 
-BmpContainer local_name_images[TOTAL_NAME_IMAGES];
-BmpContainer tz1_name_images[TOTAL_NAME_IMAGES];
-BmpContainer tz2_name_images[TOTAL_NAME_IMAGES];
-BmpContainer tz3_name_images[TOTAL_NAME_IMAGES];
-BmpContainer local_digits_images[TOTAL_TIME_IMAGES];
-BmpContainer tz1_digits_images[TOTAL_TIME_IMAGES];
-BmpContainer tz2_digits_images[TOTAL_TIME_IMAGES];
-BmpContainer tz3_digits_images[TOTAL_TIME_IMAGES];
+GBitmap *tz1_name_image;
+GBitmap *tz2_name_image;
+GBitmap *tz3_name_image;
+GBitmap *tz1_digits_image[TOTAL_IMAGES];
+GBitmap *tz2_digits_image[TOTAL_IMAGES];
+GBitmap *tz3_digits_image[TOTAL_IMAGES];
+GBitmap *splash_image;
+
+BitmapLayer *tz1_name_layer;
+BitmapLayer *tz2_name_layer;
+BitmapLayer *tz3_name_layer;
+BitmapLayer *tz1_digits_layer[TOTAL_IMAGES];
+BitmapLayer *tz2_digits_layer[TOTAL_IMAGES];
+BitmapLayer *tz3_digits_layer[TOTAL_IMAGES];
+BitmapLayer *splash_layer;
 
 const int DAY_TIME_IMAGE_RESOURCE_IDS[] =
 {
@@ -197,41 +214,80 @@ timezone_t timezones[] =
 
 
 
-void click_config_provider(ClickConfig **config, Window *window);
-void display_local(void);
-void display_tz1(void);
-void display_tz2(void);
-void display_tz3(void);
-void down_single_click_handler(ClickRecognizerRef recognizer, Window *window);
-void handle_deinit(AppContextRef ctx);
-void handle_init(AppContextRef ctx);
-void handle_second_tick(AppContextRef ctx, PebbleTickEvent *t);
-void select_long_click_handler(ClickRecognizerRef recognizer, Window *window);
-void select_long_release_handler(ClickRecognizerRef recognizer, Window *window);
-void select_single_click_handler(ClickRecognizerRef recognizer, Window *window);
-void set_container_image(BmpContainer *bmp_container, const int resource_id, GPoint origin);
-void up_single_click_handler(ClickRecognizerRef recognizer, Window *window);
-void update_display(PblTm *current_time);
+static void click_config_provider(void *config);
+static void deinit(void);
+static void display_local(void);
+static void display_tz1(void);
+static void display_tz2(void);
+static void display_tz3(void);
+static void down_single_click_handler(ClickRecognizerRef recognizer, void *context);
+static void handle_accel_tap(AccelAxisType axis, int32_t direction);
+static void handle_second_tick(struct tm *tick, TimeUnits units_changed);
+static void init(void);
+static void select_long_click_handler(ClickRecognizerRef recognizer, void *context);
+static void select_long_release_handler(ClickRecognizerRef recognizer, void *context);
+static void select_single_click_handler(ClickRecognizerRef recognizer, void *context);
+static void set_bitmap_image(GBitmap **bmp_image, BitmapLayer *bmp_layer, const int resource_id, GPoint this_origin);
+static void up_single_click_handler(ClickRecognizerRef recognizer, void *context);
+static void update_display(struct tm *current_time);
 
 
-void click_config_provider(ClickConfig **config, Window *window)
+static void click_config_provider(void *config)
 {
-   (void)window;
-
-   config[BUTTON_ID_SELECT]->click.handler = (ClickHandler) select_single_click_handler;
-
-   config[BUTTON_ID_SELECT]->long_click.handler = (ClickHandler) select_long_click_handler;
-   config[BUTTON_ID_SELECT]->long_click.release_handler = (ClickHandler) select_long_release_handler;
-
-   config[BUTTON_ID_UP]->click.handler = (ClickHandler) up_single_click_handler;
-   config[BUTTON_ID_UP]->click.repeat_interval_ms = 100;
-
-   config[BUTTON_ID_DOWN]->click.handler = (ClickHandler) down_single_click_handler;
-   config[BUTTON_ID_DOWN]->click.repeat_interval_ms = 100;
+   window_single_click_subscribe(BUTTON_ID_UP, up_single_click_handler);
+   window_single_click_subscribe(BUTTON_ID_DOWN, down_single_click_handler);
+   window_single_click_subscribe(BUTTON_ID_SELECT, select_single_click_handler);
+   window_long_click_subscribe(BUTTON_ID_SELECT, 250, select_long_click_handler, select_long_release_handler);
 }  // click_config_provider()
 
 
-void display_local(void)
+static void deinit(void)
+{
+   // Save all settings into persistent storage on app exit
+   persist_write_int(PKEY_DISPLAY_IS_LOCAL, display_is_local);
+   persist_write_int(PKEY_LOCAL_INDEX, local_index);
+   persist_write_int(PKEY_TZ1_INDEX, tz1_index);
+   persist_write_int(PKEY_TZ2_INDEX, tz2_index);
+   persist_write_int(PKEY_TZ3_INDEX, tz3_index);
+
+   layer_remove_from_parent(bitmap_layer_get_layer(tz1_name_layer));
+   bitmap_layer_destroy(tz1_name_layer);
+   gbitmap_destroy(tz1_name_image);
+
+   layer_remove_from_parent(bitmap_layer_get_layer(tz2_name_layer));
+   bitmap_layer_destroy(tz2_name_layer);
+   gbitmap_destroy(tz2_name_image);
+
+   layer_remove_from_parent(bitmap_layer_get_layer(tz3_name_layer));
+   bitmap_layer_destroy(tz3_name_layer);
+   gbitmap_destroy(tz3_name_image);
+
+   for (int i = 0; i < TOTAL_IMAGES; i++)
+   {
+      layer_remove_from_parent(bitmap_layer_get_layer(tz1_digits_layer[i]));
+      bitmap_layer_destroy(tz1_digits_layer[i]);
+      gbitmap_destroy(tz1_digits_image[i]);
+
+      layer_remove_from_parent(bitmap_layer_get_layer(tz2_digits_layer[i]));
+      bitmap_layer_destroy(tz2_digits_layer[i]);
+      gbitmap_destroy(tz2_digits_image[i]);
+
+      layer_remove_from_parent(bitmap_layer_get_layer(tz3_digits_layer[i]));
+      bitmap_layer_destroy(tz3_digits_layer[i]);
+      gbitmap_destroy(tz3_digits_image[i]);
+   }
+
+   layer_remove_from_parent(bitmap_layer_get_layer(splash_layer));
+   bitmap_layer_destroy(splash_layer);
+   gbitmap_destroy(splash_image);
+
+   tick_timer_service_unsubscribe();
+   accel_tap_service_unsubscribe();
+   window_destroy(window);
+}  // deinit()
+
+
+static void display_local(void)
 {
    int yloc = 20;
    int resource_id_1;
@@ -305,7 +361,7 @@ void display_local(void)
       }
    }
 
-   set_container_image(&local_digits_images[5], resource_id_1, GPoint(114, yloc));
+   set_bitmap_image(&tz1_digits_image[5], tz1_digits_layer[5], resource_id_1, GPoint(114, yloc));
 
    // display local name
    if (app_state == APP_SET_LOCAL_STATE)
@@ -359,7 +415,7 @@ void display_local(void)
       }
    }
 
-   set_container_image(&local_name_images[0], resource_id_1, GPoint(0, yloc - 20));
+   set_bitmap_image(&tz1_name_image, tz1_name_layer, resource_id_1, GPoint(0, yloc - 20));
 
    // display time hour
    if (clock_is_24h_style())
@@ -447,11 +503,11 @@ void display_local(void)
       }
    }
 
-   set_container_image(&local_digits_images[0], resource_id_1, GPoint(0, yloc));
-   set_container_image(&local_digits_images[1], resource_id_2, GPoint(26, yloc));
+   set_bitmap_image(&tz1_digits_image[0], tz1_digits_layer[0], resource_id_1, GPoint(0, yloc));
+   set_bitmap_image(&tz1_digits_image[1], tz1_digits_layer[1], resource_id_2, GPoint(26, yloc));
 
    // display no AM/PM
-   set_container_image(&local_digits_images[6], resource_id_3, GPoint(114, yloc + 18));
+   set_bitmap_image(&tz1_digits_image[6], tz1_digits_layer[6], resource_id_3, GPoint(114, yloc + 18));
 
    // display local colon & minutes
    if ((current_time_local.tm_hour >= 6) && (current_time_local.tm_hour <= 18))
@@ -467,13 +523,13 @@ void display_local(void)
       resource_id_3 = NIGHT_TIME_IMAGE_RESOURCE_IDS[current_time_local.tm_min % 10];
    }
 
-   set_container_image(&local_digits_images[2], resource_id_1, GPoint(52, yloc));
-   set_container_image(&local_digits_images[3], resource_id_2, GPoint(62, yloc));
-   set_container_image(&local_digits_images[4], resource_id_3, GPoint(88, yloc));
+   set_bitmap_image(&tz1_digits_image[2], tz1_digits_layer[2], resource_id_1, GPoint(52, yloc));
+   set_bitmap_image(&tz1_digits_image[3], tz1_digits_layer[3], resource_id_2, GPoint(62, yloc));
+   set_bitmap_image(&tz1_digits_image[4], tz1_digits_layer[4], resource_id_3, GPoint(88, yloc));
 }  // display_local()
 
 
-void display_tz1(void)
+static void display_tz1(void)
 {
    int yloc = 20;
    int resource_id_1;
@@ -547,7 +603,7 @@ void display_tz1(void)
       }
    }
 
-   set_container_image(&tz1_digits_images[5], resource_id_1, GPoint(114, yloc));
+   set_bitmap_image(&tz1_digits_image[5], tz1_digits_layer[5], resource_id_1, GPoint(114, yloc));
 
    // display tz1 name
    if (app_state == APP_SET_TZ1_STATE)
@@ -601,7 +657,7 @@ void display_tz1(void)
       }
    }
 
-   set_container_image(&tz1_name_images[0], resource_id_1, GPoint(0, yloc - 20));
+   set_bitmap_image(&tz1_name_image, tz1_name_layer, resource_id_1, GPoint(0, yloc - 20));
 
    // display time hour
    if (clock_is_24h_style())
@@ -689,29 +745,29 @@ void display_tz1(void)
       }
    }
 
-   set_container_image(&tz1_digits_images[0], resource_id_1, GPoint(0, yloc));
-   set_container_image(&tz1_digits_images[1], resource_id_2, GPoint(26, yloc));
+   set_bitmap_image(&tz1_digits_image[0], tz1_digits_layer[0], resource_id_1, GPoint(0, yloc));
+   set_bitmap_image(&tz1_digits_image[1], tz1_digits_layer[1], resource_id_2, GPoint(26, yloc));
 
    // display no AM/PM
-   set_container_image(&tz1_digits_images[6], resource_id_3, GPoint(114, yloc + 18));
+   set_bitmap_image(&tz1_digits_image[6], tz1_digits_layer[6], resource_id_3, GPoint(114, yloc + 18));
 
    // display tz1 colon & minutes
    if ((current_time1.tm_hour >= 6) && (current_time1.tm_hour <= 18))
    {
-      set_container_image(&tz1_digits_images[2], RESOURCE_ID_IMAGE_DAY_TIME_COLON, GPoint(52, yloc));
-      set_container_image(&tz1_digits_images[3], DAY_TIME_IMAGE_RESOURCE_IDS[current_time1.tm_min / 10], GPoint(62, yloc));
-      set_container_image(&tz1_digits_images[4], DAY_TIME_IMAGE_RESOURCE_IDS[current_time1.tm_min % 10], GPoint(88, yloc));
+      set_bitmap_image(&tz1_digits_image[2], tz1_digits_layer[2], RESOURCE_ID_IMAGE_DAY_TIME_COLON, GPoint(52, yloc));
+      set_bitmap_image(&tz1_digits_image[3], tz1_digits_layer[3], DAY_TIME_IMAGE_RESOURCE_IDS[current_time1.tm_min / 10], GPoint(62, yloc));
+      set_bitmap_image(&tz1_digits_image[4], tz1_digits_layer[4], DAY_TIME_IMAGE_RESOURCE_IDS[current_time1.tm_min % 10], GPoint(88, yloc));
    }
    else
    {
-      set_container_image(&tz1_digits_images[2], RESOURCE_ID_IMAGE_NIGHT_TIME_COLON, GPoint(52, yloc));
-      set_container_image(&tz1_digits_images[3], NIGHT_TIME_IMAGE_RESOURCE_IDS[current_time1.tm_min / 10], GPoint(62, yloc));
-      set_container_image(&tz1_digits_images[4], NIGHT_TIME_IMAGE_RESOURCE_IDS[current_time1.tm_min % 10], GPoint(88, yloc));
+      set_bitmap_image(&tz1_digits_image[2], tz1_digits_layer[2], RESOURCE_ID_IMAGE_NIGHT_TIME_COLON, GPoint(52, yloc));
+      set_bitmap_image(&tz1_digits_image[3], tz1_digits_layer[3], NIGHT_TIME_IMAGE_RESOURCE_IDS[current_time1.tm_min / 10], GPoint(62, yloc));
+      set_bitmap_image(&tz1_digits_image[4], tz1_digits_layer[4], NIGHT_TIME_IMAGE_RESOURCE_IDS[current_time1.tm_min % 10], GPoint(88, yloc));
    }
 }  // display_tz1()
 
 
-void display_tz2(void)
+static void display_tz2(void)
 {
    int yloc = 76;
 
@@ -742,12 +798,12 @@ void display_tz2(void)
       if ((current_time2.tm_hour >= 6) && (current_time2.tm_hour <= 18))
       {
          // display + offset
-         set_container_image(&tz2_digits_images[5], RESOURCE_ID_IMAGE_DAY_TIME_PLUS, GPoint(114, yloc));
+         set_bitmap_image(&tz2_digits_image[5], tz2_digits_layer[5], RESOURCE_ID_IMAGE_DAY_TIME_PLUS, GPoint(114, yloc));
       }
       else
       {
          // display + offset
-         set_container_image(&tz2_digits_images[5], RESOURCE_ID_IMAGE_NIGHT_TIME_PLUS, GPoint(114, yloc));
+         set_bitmap_image(&tz2_digits_image[5], tz2_digits_layer[5], RESOURCE_ID_IMAGE_NIGHT_TIME_PLUS, GPoint(114, yloc));
       }
    }
    else
@@ -759,12 +815,12 @@ void display_tz2(void)
          if ((current_time2.tm_hour >= 6) && (current_time2.tm_hour <= 18))
          {
             // display - offset
-            set_container_image(&tz2_digits_images[5], RESOURCE_ID_IMAGE_DAY_TIME_MINUS, GPoint(114, yloc));
+            set_bitmap_image(&tz2_digits_image[5], tz2_digits_layer[5], RESOURCE_ID_IMAGE_DAY_TIME_MINUS, GPoint(114, yloc));
          }
          else
          {
             // display - offset
-            set_container_image(&tz2_digits_images[5], RESOURCE_ID_IMAGE_NIGHT_TIME_MINUS, GPoint(114, yloc));
+            set_bitmap_image(&tz2_digits_image[5], tz2_digits_layer[5], RESOURCE_ID_IMAGE_NIGHT_TIME_MINUS, GPoint(114, yloc));
          }
       }
       else
@@ -772,12 +828,12 @@ void display_tz2(void)
          if ((current_time2.tm_hour >= 6) && (current_time2.tm_hour <= 18))
          {
             // display no offset
-            set_container_image(&tz2_digits_images[5], RESOURCE_ID_IMAGE_DAY_TIME_NONE, GPoint(114, yloc));
+            set_bitmap_image(&tz2_digits_image[5], tz2_digits_layer[5], RESOURCE_ID_IMAGE_DAY_TIME_NONE, GPoint(114, yloc));
          }
          else
          {
             // display no offset
-            set_container_image(&tz2_digits_images[5], RESOURCE_ID_IMAGE_NIGHT_TIME_NONE, GPoint(114, yloc));
+            set_bitmap_image(&tz2_digits_image[5], tz2_digits_layer[5], RESOURCE_ID_IMAGE_NIGHT_TIME_NONE, GPoint(114, yloc));
          }
       }
    }
@@ -787,22 +843,22 @@ void display_tz2(void)
    {
       if (toggle_flag == false)
       {
-         set_container_image(&tz2_name_images[0], timezones[tz2_index].day_image_id, GPoint(0, yloc - 20));
+         set_bitmap_image(&tz2_name_image, tz2_name_layer, timezones[tz2_index].day_image_id, GPoint(0, yloc - 20));
       }
       else
       {
-         set_container_image(&tz2_name_images[0], timezones[tz2_index].night_image_id, GPoint(0, yloc - 20));
+         set_bitmap_image(&tz2_name_image, tz2_name_layer, timezones[tz2_index].night_image_id, GPoint(0, yloc - 20));
       }
    }
    else
    {
       if ((current_time2.tm_hour >= 6) && (current_time2.tm_hour <= 18))
       {
-         set_container_image(&tz2_name_images[0], timezones[tz2_index].day_image_id, GPoint(0, yloc - 20));
+         set_bitmap_image(&tz2_name_image, tz2_name_layer, timezones[tz2_index].day_image_id, GPoint(0, yloc - 20));
       }
       else
       {
-         set_container_image(&tz2_name_images[0], timezones[tz2_index].night_image_id, GPoint(0, yloc - 20));
+         set_bitmap_image(&tz2_name_image, tz2_name_layer, timezones[tz2_index].night_image_id, GPoint(0, yloc - 20));
       }
    }
 
@@ -811,19 +867,19 @@ void display_tz2(void)
    {
       if ((current_time2.tm_hour >= 6) && (current_time2.tm_hour <= 18))
       {
-         set_container_image(&tz2_digits_images[0], DAY_TIME_IMAGE_RESOURCE_IDS[current_time2.tm_hour / 10], GPoint(0, yloc));
-         set_container_image(&tz2_digits_images[1], DAY_TIME_IMAGE_RESOURCE_IDS[current_time2.tm_hour % 10], GPoint(26, yloc));
+         set_bitmap_image(&tz2_digits_image[0], tz2_digits_layer[0], DAY_TIME_IMAGE_RESOURCE_IDS[current_time2.tm_hour / 10], GPoint(0, yloc));
+         set_bitmap_image(&tz2_digits_image[1], tz2_digits_layer[1], DAY_TIME_IMAGE_RESOURCE_IDS[current_time2.tm_hour % 10], GPoint(26, yloc));
 
          // display no AM/PM
-         set_container_image(&tz2_digits_images[6], RESOURCE_ID_IMAGE_DAY_TIME_NONE, GPoint(114, yloc + 18));
+         set_bitmap_image(&tz2_digits_image[6], tz2_digits_layer[6], RESOURCE_ID_IMAGE_DAY_TIME_NONE, GPoint(114, yloc + 18));
       }
       else
       {
-         set_container_image(&tz2_digits_images[0], NIGHT_TIME_IMAGE_RESOURCE_IDS[current_time2.tm_hour / 10], GPoint(0, yloc));
-         set_container_image(&tz2_digits_images[1], NIGHT_TIME_IMAGE_RESOURCE_IDS[current_time2.tm_hour % 10], GPoint(26, yloc));
+         set_bitmap_image(&tz2_digits_image[0], tz2_digits_layer[0], NIGHT_TIME_IMAGE_RESOURCE_IDS[current_time2.tm_hour / 10], GPoint(0, yloc));
+         set_bitmap_image(&tz2_digits_image[1], tz2_digits_layer[1], NIGHT_TIME_IMAGE_RESOURCE_IDS[current_time2.tm_hour % 10], GPoint(26, yloc));
 
          // display no AM/PM
-         set_container_image(&tz2_digits_images[6], RESOURCE_ID_IMAGE_NIGHT_TIME_NONE, GPoint(114, yloc + 18));
+         set_bitmap_image(&tz2_digits_image[6], tz2_digits_layer[6], RESOURCE_ID_IMAGE_NIGHT_TIME_NONE, GPoint(114, yloc + 18));
       }
    }
    else
@@ -833,22 +889,22 @@ void display_tz2(void)
       {
          if (current_time2.tm_hour <= 18)
          {
-            set_container_image(&tz2_digits_images[6], RESOURCE_ID_IMAGE_DAY_TIME_PM, GPoint(114, yloc + 18));
+            set_bitmap_image(&tz2_digits_image[6], tz2_digits_layer[6], RESOURCE_ID_IMAGE_DAY_TIME_PM, GPoint(114, yloc + 18));
          }
          else
          {
-            set_container_image(&tz2_digits_images[6], RESOURCE_ID_IMAGE_NIGHT_TIME_PM, GPoint(114, yloc + 18));
+            set_bitmap_image(&tz2_digits_image[6], tz2_digits_layer[6], RESOURCE_ID_IMAGE_NIGHT_TIME_PM, GPoint(114, yloc + 18));
          }
       }
       else
       {
          if (current_time2.tm_hour >= 6)
          {
-            set_container_image(&tz2_digits_images[6], RESOURCE_ID_IMAGE_DAY_TIME_AM, GPoint(114, yloc + 18));
+            set_bitmap_image(&tz2_digits_image[6], tz2_digits_layer[6], RESOURCE_ID_IMAGE_DAY_TIME_AM, GPoint(114, yloc + 18));
          }
          else
          {
-            set_container_image(&tz2_digits_images[6], RESOURCE_ID_IMAGE_NIGHT_TIME_AM, GPoint(114, yloc + 18));
+            set_bitmap_image(&tz2_digits_image[6], tz2_digits_layer[6], RESOURCE_ID_IMAGE_NIGHT_TIME_AM, GPoint(114, yloc + 18));
          }
       }
 
@@ -856,37 +912,37 @@ void display_tz2(void)
       {
          if ((current_time2.tm_hour >= 6) && (current_time2.tm_hour <= 18))
          {
-            set_container_image(&tz2_digits_images[0], DAY_TIME_IMAGE_RESOURCE_IDS[1], GPoint(0, yloc));
-            set_container_image(&tz2_digits_images[1], DAY_TIME_IMAGE_RESOURCE_IDS[2], GPoint(26, yloc));
+            set_bitmap_image(&tz2_digits_image[0], tz2_digits_layer[0], DAY_TIME_IMAGE_RESOURCE_IDS[1], GPoint(0, yloc));
+            set_bitmap_image(&tz2_digits_image[1], tz2_digits_layer[1], DAY_TIME_IMAGE_RESOURCE_IDS[2], GPoint(26, yloc));
          }
          else
          {
-            set_container_image(&tz2_digits_images[0], NIGHT_TIME_IMAGE_RESOURCE_IDS[1], GPoint(0, yloc));
-            set_container_image(&tz2_digits_images[1], NIGHT_TIME_IMAGE_RESOURCE_IDS[2], GPoint(26, yloc));
+            set_bitmap_image(&tz2_digits_image[0], tz2_digits_layer[0], NIGHT_TIME_IMAGE_RESOURCE_IDS[1], GPoint(0, yloc));
+            set_bitmap_image(&tz2_digits_image[1], tz2_digits_layer[1], NIGHT_TIME_IMAGE_RESOURCE_IDS[2], GPoint(26, yloc));
          }
       }
       else
       {
          if ((current_time2.tm_hour >= 6) && (current_time2.tm_hour <= 18))
          {
-            set_container_image(&tz2_digits_images[0], DAY_TIME_IMAGE_RESOURCE_IDS[(current_time2.tm_hour % 12) / 10], GPoint(0, yloc));
-            set_container_image(&tz2_digits_images[1], DAY_TIME_IMAGE_RESOURCE_IDS[(current_time2.tm_hour % 12) % 10], GPoint(26, yloc));
+            set_bitmap_image(&tz2_digits_image[0], tz2_digits_layer[0], DAY_TIME_IMAGE_RESOURCE_IDS[(current_time2.tm_hour % 12) / 10], GPoint(0, yloc));
+            set_bitmap_image(&tz2_digits_image[1], tz2_digits_layer[1], DAY_TIME_IMAGE_RESOURCE_IDS[(current_time2.tm_hour % 12) % 10], GPoint(26, yloc));
          }
          else
          {
-            set_container_image(&tz2_digits_images[0], NIGHT_TIME_IMAGE_RESOURCE_IDS[(current_time2.tm_hour % 12) / 10], GPoint(0, yloc));
-            set_container_image(&tz2_digits_images[1], NIGHT_TIME_IMAGE_RESOURCE_IDS[(current_time2.tm_hour % 12) % 10], GPoint(26, yloc));
+            set_bitmap_image(&tz2_digits_image[0], tz2_digits_layer[0], NIGHT_TIME_IMAGE_RESOURCE_IDS[(current_time2.tm_hour % 12) / 10], GPoint(0, yloc));
+            set_bitmap_image(&tz2_digits_image[1], tz2_digits_layer[1], NIGHT_TIME_IMAGE_RESOURCE_IDS[(current_time2.tm_hour % 12) % 10], GPoint(26, yloc));
          }
 
          if ((current_time2.tm_hour % 12) < 10)
          {
             if ((current_time2.tm_hour >= 6) && (current_time2.tm_hour <= 18))
             {
-               set_container_image(&tz2_digits_images[0], RESOURCE_ID_IMAGE_DAY_TIME_BLANK, GPoint(0, yloc));
+               set_bitmap_image(&tz2_digits_image[0], tz2_digits_layer[0], RESOURCE_ID_IMAGE_DAY_TIME_BLANK, GPoint(0, yloc));
             }
             else
             {
-               set_container_image(&tz2_digits_images[0], RESOURCE_ID_IMAGE_NIGHT_TIME_BLANK, GPoint(0, yloc));
+               set_bitmap_image(&tz2_digits_image[0], tz2_digits_layer[0], RESOURCE_ID_IMAGE_NIGHT_TIME_BLANK, GPoint(0, yloc));
             }
          }
       }
@@ -895,20 +951,20 @@ void display_tz2(void)
    // display tz2 colon & minutes
    if ((current_time2.tm_hour >= 6) && (current_time2.tm_hour <= 18))
    {
-      set_container_image(&tz2_digits_images[2], RESOURCE_ID_IMAGE_DAY_TIME_COLON, GPoint(52, yloc));
-      set_container_image(&tz2_digits_images[3], DAY_TIME_IMAGE_RESOURCE_IDS[current_time2.tm_min / 10], GPoint(62, yloc));
-      set_container_image(&tz2_digits_images[4], DAY_TIME_IMAGE_RESOURCE_IDS[current_time2.tm_min % 10], GPoint(88, yloc));
+      set_bitmap_image(&tz2_digits_image[2], tz2_digits_layer[2], RESOURCE_ID_IMAGE_DAY_TIME_COLON, GPoint(52, yloc));
+      set_bitmap_image(&tz2_digits_image[3], tz2_digits_layer[3], DAY_TIME_IMAGE_RESOURCE_IDS[current_time2.tm_min / 10], GPoint(62, yloc));
+      set_bitmap_image(&tz2_digits_image[4], tz2_digits_layer[4], DAY_TIME_IMAGE_RESOURCE_IDS[current_time2.tm_min % 10], GPoint(88, yloc));
    }
    else
    {
-      set_container_image(&tz2_digits_images[2], RESOURCE_ID_IMAGE_NIGHT_TIME_COLON, GPoint(52, yloc));
-      set_container_image(&tz2_digits_images[3], NIGHT_TIME_IMAGE_RESOURCE_IDS[current_time2.tm_min / 10], GPoint(62, yloc));
-      set_container_image(&tz2_digits_images[4], NIGHT_TIME_IMAGE_RESOURCE_IDS[current_time2.tm_min % 10], GPoint(88, yloc));
+      set_bitmap_image(&tz2_digits_image[2], tz2_digits_layer[2], RESOURCE_ID_IMAGE_NIGHT_TIME_COLON, GPoint(52, yloc));
+      set_bitmap_image(&tz2_digits_image[3], tz2_digits_layer[3], NIGHT_TIME_IMAGE_RESOURCE_IDS[current_time2.tm_min / 10], GPoint(62, yloc));
+      set_bitmap_image(&tz2_digits_image[4], tz2_digits_layer[4], NIGHT_TIME_IMAGE_RESOURCE_IDS[current_time2.tm_min % 10], GPoint(88, yloc));
    }
 }  // display_tz2()
 
 
-void display_tz3(void)
+static void display_tz3(void)
 {
    int yloc = 132;
 
@@ -939,12 +995,12 @@ void display_tz3(void)
       if ((current_time3.tm_hour >= 6) && (current_time3.tm_hour <= 18))
       {
          // display + offset
-         set_container_image(&tz3_digits_images[5], RESOURCE_ID_IMAGE_DAY_TIME_PLUS, GPoint(114, yloc));
+         set_bitmap_image(&tz3_digits_image[5], tz3_digits_layer[5], RESOURCE_ID_IMAGE_DAY_TIME_PLUS, GPoint(114, yloc));
       }
       else
       {
          // display + offset
-         set_container_image(&tz3_digits_images[5], RESOURCE_ID_IMAGE_NIGHT_TIME_PLUS, GPoint(114, yloc));
+         set_bitmap_image(&tz3_digits_image[5], tz3_digits_layer[5], RESOURCE_ID_IMAGE_NIGHT_TIME_PLUS, GPoint(114, yloc));
       }
    }
    else
@@ -956,12 +1012,12 @@ void display_tz3(void)
          if ((current_time3.tm_hour >= 6) && (current_time3.tm_hour <= 18))
          {
             // display - offset
-            set_container_image(&tz3_digits_images[5], RESOURCE_ID_IMAGE_DAY_TIME_MINUS, GPoint(114, yloc));
+            set_bitmap_image(&tz3_digits_image[5], tz3_digits_layer[5], RESOURCE_ID_IMAGE_DAY_TIME_MINUS, GPoint(114, yloc));
          }
          else
          {
             // display - offset
-            set_container_image(&tz3_digits_images[5], RESOURCE_ID_IMAGE_NIGHT_TIME_MINUS, GPoint(114, yloc));
+            set_bitmap_image(&tz3_digits_image[5], tz3_digits_layer[5], RESOURCE_ID_IMAGE_NIGHT_TIME_MINUS, GPoint(114, yloc));
          }
       }
       else
@@ -969,12 +1025,12 @@ void display_tz3(void)
          if ((current_time3.tm_hour >= 6) && (current_time3.tm_hour <= 18))
          {
             // display no offset
-            set_container_image(&tz3_digits_images[5], RESOURCE_ID_IMAGE_DAY_TIME_NONE, GPoint(114, yloc));
+            set_bitmap_image(&tz3_digits_image[5], tz3_digits_layer[5], RESOURCE_ID_IMAGE_DAY_TIME_NONE, GPoint(114, yloc));
          }
          else
          {
             // display no offset
-            set_container_image(&tz3_digits_images[5], RESOURCE_ID_IMAGE_NIGHT_TIME_NONE, GPoint(114, yloc));
+            set_bitmap_image(&tz3_digits_image[5], tz3_digits_layer[5], RESOURCE_ID_IMAGE_NIGHT_TIME_NONE, GPoint(114, yloc));
          }
       }
    }
@@ -984,22 +1040,22 @@ void display_tz3(void)
    {
       if (toggle_flag == false)
       {
-         set_container_image(&tz3_name_images[0], timezones[tz3_index].day_image_id, GPoint(0, yloc - 20));
+         set_bitmap_image(&tz3_name_image, tz3_name_layer, timezones[tz3_index].day_image_id, GPoint(0, yloc - 20));
       }
       else
       {
-         set_container_image(&tz3_name_images[0], timezones[tz3_index].night_image_id, GPoint(0, yloc - 20));
+         set_bitmap_image(&tz3_name_image, tz3_name_layer, timezones[tz3_index].night_image_id, GPoint(0, yloc - 20));
       }
    }
    else
    {
       if ((current_time3.tm_hour >= 6) && (current_time3.tm_hour <= 18))
       {
-         set_container_image(&tz3_name_images[0], timezones[tz3_index].day_image_id, GPoint(0, yloc - 20));
+         set_bitmap_image(&tz3_name_image, tz3_name_layer, timezones[tz3_index].day_image_id, GPoint(0, yloc - 20));
       }
       else
       {
-         set_container_image(&tz3_name_images[0], timezones[tz3_index].night_image_id, GPoint(0, yloc - 20));
+         set_bitmap_image(&tz3_name_image, tz3_name_layer, timezones[tz3_index].night_image_id, GPoint(0, yloc - 20));
       }
    }
 
@@ -1008,19 +1064,19 @@ void display_tz3(void)
    {
       if ((current_time3.tm_hour >= 6) && (current_time3.tm_hour <= 18))
       {
-         set_container_image(&tz3_digits_images[0], DAY_TIME_IMAGE_RESOURCE_IDS[current_time3.tm_hour / 10], GPoint(0, yloc));
-         set_container_image(&tz3_digits_images[1], DAY_TIME_IMAGE_RESOURCE_IDS[current_time3.tm_hour % 10], GPoint(26, yloc));
+         set_bitmap_image(&tz3_digits_image[0], tz3_digits_layer[0], DAY_TIME_IMAGE_RESOURCE_IDS[current_time3.tm_hour / 10], GPoint(0, yloc));
+         set_bitmap_image(&tz3_digits_image[1], tz3_digits_layer[1], DAY_TIME_IMAGE_RESOURCE_IDS[current_time3.tm_hour % 10], GPoint(26, yloc));
 
          // display no AM/PM
-         set_container_image(&tz3_digits_images[6], RESOURCE_ID_IMAGE_DAY_TIME_NONE, GPoint(114, yloc + 18));
+         set_bitmap_image(&tz3_digits_image[6], tz3_digits_layer[6], RESOURCE_ID_IMAGE_DAY_TIME_NONE, GPoint(114, yloc + 18));
       }
       else
       {
-         set_container_image(&tz3_digits_images[0], NIGHT_TIME_IMAGE_RESOURCE_IDS[current_time3.tm_hour / 10], GPoint(0, yloc));
-         set_container_image(&tz3_digits_images[1], NIGHT_TIME_IMAGE_RESOURCE_IDS[current_time3.tm_hour % 10], GPoint(26, yloc));
+         set_bitmap_image(&tz3_digits_image[0], tz3_digits_layer[0], NIGHT_TIME_IMAGE_RESOURCE_IDS[current_time3.tm_hour / 10], GPoint(0, yloc));
+         set_bitmap_image(&tz3_digits_image[1], tz3_digits_layer[1], NIGHT_TIME_IMAGE_RESOURCE_IDS[current_time3.tm_hour % 10], GPoint(26, yloc));
 
          // display no AM/PM
-         set_container_image(&tz3_digits_images[6], RESOURCE_ID_IMAGE_NIGHT_TIME_NONE, GPoint(114, yloc + 18));
+         set_bitmap_image(&tz3_digits_image[6], tz3_digits_layer[6], RESOURCE_ID_IMAGE_NIGHT_TIME_NONE, GPoint(114, yloc + 18));
       }
    }
    else
@@ -1030,22 +1086,22 @@ void display_tz3(void)
       {
          if (current_time3.tm_hour <= 18)
          {
-            set_container_image(&tz3_digits_images[6], RESOURCE_ID_IMAGE_DAY_TIME_PM, GPoint(114, yloc + 18));
+            set_bitmap_image(&tz3_digits_image[6], tz3_digits_layer[6], RESOURCE_ID_IMAGE_DAY_TIME_PM, GPoint(114, yloc + 18));
          }
          else
          {
-            set_container_image(&tz3_digits_images[6], RESOURCE_ID_IMAGE_NIGHT_TIME_PM, GPoint(114, yloc + 18));
+            set_bitmap_image(&tz3_digits_image[6], tz3_digits_layer[6], RESOURCE_ID_IMAGE_NIGHT_TIME_PM, GPoint(114, yloc + 18));
          }
       }
       else
       {
          if (current_time3.tm_hour >= 6)
          {
-            set_container_image(&tz3_digits_images[6], RESOURCE_ID_IMAGE_DAY_TIME_AM, GPoint(114, yloc + 18));
+            set_bitmap_image(&tz3_digits_image[6], tz3_digits_layer[6], RESOURCE_ID_IMAGE_DAY_TIME_AM, GPoint(114, yloc + 18));
          }
          else
          {
-            set_container_image(&tz3_digits_images[6], RESOURCE_ID_IMAGE_NIGHT_TIME_AM, GPoint(114, yloc + 18));
+            set_bitmap_image(&tz3_digits_image[6], tz3_digits_layer[6], RESOURCE_ID_IMAGE_NIGHT_TIME_AM, GPoint(114, yloc + 18));
          }
       }
 
@@ -1053,37 +1109,37 @@ void display_tz3(void)
       {
          if ((current_time3.tm_hour >= 6) && (current_time3.tm_hour <= 18))
          {
-            set_container_image(&tz3_digits_images[0], DAY_TIME_IMAGE_RESOURCE_IDS[1], GPoint(0, yloc));
-            set_container_image(&tz3_digits_images[1], DAY_TIME_IMAGE_RESOURCE_IDS[2], GPoint(26, yloc));
+            set_bitmap_image(&tz3_digits_image[0], tz3_digits_layer[0], DAY_TIME_IMAGE_RESOURCE_IDS[1], GPoint(0, yloc));
+            set_bitmap_image(&tz3_digits_image[1], tz3_digits_layer[1], DAY_TIME_IMAGE_RESOURCE_IDS[2], GPoint(26, yloc));
          }
          else
          {
-            set_container_image(&tz3_digits_images[0], NIGHT_TIME_IMAGE_RESOURCE_IDS[1], GPoint(0, yloc));
-            set_container_image(&tz3_digits_images[1], NIGHT_TIME_IMAGE_RESOURCE_IDS[2], GPoint(26, yloc));
+            set_bitmap_image(&tz3_digits_image[0], tz3_digits_layer[0], NIGHT_TIME_IMAGE_RESOURCE_IDS[1], GPoint(0, yloc));
+            set_bitmap_image(&tz3_digits_image[1], tz3_digits_layer[1], NIGHT_TIME_IMAGE_RESOURCE_IDS[2], GPoint(26, yloc));
          }
       }
       else
       {
          if ((current_time3.tm_hour >= 6) && (current_time3.tm_hour <= 18))
          {
-            set_container_image(&tz3_digits_images[0], DAY_TIME_IMAGE_RESOURCE_IDS[(current_time3.tm_hour % 12) / 10], GPoint(0, yloc));
-            set_container_image(&tz3_digits_images[1], DAY_TIME_IMAGE_RESOURCE_IDS[(current_time3.tm_hour % 12) % 10], GPoint(26, yloc));
+            set_bitmap_image(&tz3_digits_image[0], tz3_digits_layer[0], DAY_TIME_IMAGE_RESOURCE_IDS[(current_time3.tm_hour % 12) / 10], GPoint(0, yloc));
+            set_bitmap_image(&tz3_digits_image[1], tz3_digits_layer[1], DAY_TIME_IMAGE_RESOURCE_IDS[(current_time3.tm_hour % 12) % 10], GPoint(26, yloc));
          }
          else
          {
-            set_container_image(&tz3_digits_images[0], NIGHT_TIME_IMAGE_RESOURCE_IDS[(current_time3.tm_hour % 12) / 10], GPoint(0, yloc));
-            set_container_image(&tz3_digits_images[1], NIGHT_TIME_IMAGE_RESOURCE_IDS[(current_time3.tm_hour % 12) % 10], GPoint(26, yloc));
+            set_bitmap_image(&tz3_digits_image[0], tz3_digits_layer[0], NIGHT_TIME_IMAGE_RESOURCE_IDS[(current_time3.tm_hour % 12) / 10], GPoint(0, yloc));
+            set_bitmap_image(&tz3_digits_image[1], tz3_digits_layer[1], NIGHT_TIME_IMAGE_RESOURCE_IDS[(current_time3.tm_hour % 12) % 10], GPoint(26, yloc));
          }
 
          if ((current_time3.tm_hour % 12) < 10)
          {
             if ((current_time3.tm_hour >= 6) && (current_time3.tm_hour <= 18))
             {
-               set_container_image(&tz3_digits_images[0], RESOURCE_ID_IMAGE_DAY_TIME_BLANK, GPoint(0, yloc));
+               set_bitmap_image(&tz3_digits_image[0], tz3_digits_layer[0], RESOURCE_ID_IMAGE_DAY_TIME_BLANK, GPoint(0, yloc));
             }
             else
             {
-               set_container_image(&tz3_digits_images[0], RESOURCE_ID_IMAGE_NIGHT_TIME_BLANK, GPoint(0, yloc));
+               set_bitmap_image(&tz3_digits_image[0], tz3_digits_layer[0], RESOURCE_ID_IMAGE_NIGHT_TIME_BLANK, GPoint(0, yloc));
             }
          }
       }
@@ -1092,30 +1148,30 @@ void display_tz3(void)
    // display tz3 colon & minutes
    if ((current_time3.tm_hour >= 6) && (current_time3.tm_hour <= 18))
    {
-      set_container_image(&tz3_digits_images[2], RESOURCE_ID_IMAGE_DAY_TIME_COLON, GPoint(52, yloc));
-      set_container_image(&tz3_digits_images[3], DAY_TIME_IMAGE_RESOURCE_IDS[current_time3.tm_min / 10], GPoint(62, yloc));
-      set_container_image(&tz3_digits_images[4], DAY_TIME_IMAGE_RESOURCE_IDS[current_time3.tm_min % 10], GPoint(88, yloc));
+      set_bitmap_image(&tz3_digits_image[2], tz3_digits_layer[2], RESOURCE_ID_IMAGE_DAY_TIME_COLON, GPoint(52, yloc));
+      set_bitmap_image(&tz3_digits_image[3], tz3_digits_layer[3], DAY_TIME_IMAGE_RESOURCE_IDS[current_time3.tm_min / 10], GPoint(62, yloc));
+      set_bitmap_image(&tz3_digits_image[4], tz3_digits_layer[4], DAY_TIME_IMAGE_RESOURCE_IDS[current_time3.tm_min % 10], GPoint(88, yloc));
    }
    else
    {
-      set_container_image(&tz3_digits_images[2], RESOURCE_ID_IMAGE_NIGHT_TIME_COLON, GPoint(52, yloc));
-      set_container_image(&tz3_digits_images[3], NIGHT_TIME_IMAGE_RESOURCE_IDS[current_time3.tm_min / 10], GPoint(62, yloc));
-      set_container_image(&tz3_digits_images[4], NIGHT_TIME_IMAGE_RESOURCE_IDS[current_time3.tm_min % 10], GPoint(88, yloc));
+      set_bitmap_image(&tz3_digits_image[2], tz3_digits_layer[2], RESOURCE_ID_IMAGE_NIGHT_TIME_COLON, GPoint(52, yloc));
+      set_bitmap_image(&tz3_digits_image[3], tz3_digits_layer[3], NIGHT_TIME_IMAGE_RESOURCE_IDS[current_time3.tm_min / 10], GPoint(62, yloc));
+      set_bitmap_image(&tz3_digits_image[4], tz3_digits_layer[4], NIGHT_TIME_IMAGE_RESOURCE_IDS[current_time3.tm_min % 10], GPoint(88, yloc));
    }
 }  // display_tz3()
 
 
-void down_single_click_handler(ClickRecognizerRef recognizer, Window *window)
+static void down_single_click_handler(ClickRecognizerRef recognizer, void *context)
 {
-   (void)recognizer;
-   (void)window;
-
    switch (app_state)
    {
       case APP_SET_LOCAL_STATE:
          if (local_index < (NUM_TIMEZONES - 1))
          {
             local_index++;
+
+            // save local_index into persistent storage
+            persist_write_int(PKEY_LOCAL_INDEX, local_index);
 
             local_offset_hours = timezones[local_index].offset_hours;
             local_offset_mins = timezones[local_index].offset_mins;
@@ -1129,6 +1185,9 @@ void down_single_click_handler(ClickRecognizerRef recognizer, Window *window)
          {
             tz1_index++;
 
+            // save tz1_index into persistent storage
+            persist_write_int(PKEY_TZ1_INDEX, tz1_index);
+
             tz1_offset_hours = timezones[tz1_index].offset_hours;
             tz1_offset_mins = timezones[tz1_index].offset_mins;
          }
@@ -1140,6 +1199,9 @@ void down_single_click_handler(ClickRecognizerRef recognizer, Window *window)
          if (tz2_index < (NUM_TIMEZONES - 1))
          {
             tz2_index++;
+
+            // save tz2_index into persistent storage
+            persist_write_int(PKEY_TZ2_INDEX, tz2_index);
 
             tz2_offset_hours = timezones[tz2_index].offset_hours;
             tz2_offset_mins = timezones[tz2_index].offset_mins;
@@ -1153,6 +1215,9 @@ void down_single_click_handler(ClickRecognizerRef recognizer, Window *window)
          {
             tz3_index++;
 
+            // save tz3_index into persistent storage
+            persist_write_int(PKEY_TZ3_INDEX, tz3_index);
+
             tz3_offset_hours = timezones[tz3_index].offset_hours;
             tz3_offset_mins = timezones[tz3_index].offset_mins;
          }
@@ -1163,97 +1228,162 @@ void down_single_click_handler(ClickRecognizerRef recognizer, Window *window)
       default:
          break;
    }
-
-   // invalidate initial previous_time;
-   previous_time.tm_min = -1;
-   previous_time.tm_hour = -1;
 }  // down_single_click_handler()
 
 
-void handle_deinit(AppContextRef ctx)
+static void handle_accel_tap(AccelAxisType axis, int32_t direction)
 {
-   (void)ctx;
+   light_on = !light_on;
 
-   for (int i = 0; i < TOTAL_NAME_IMAGES; i++)
+   if (light_on)
    {
-      bmp_deinit_container(&local_name_images[i]);
-      bmp_deinit_container(&tz1_name_images[i]);
-      bmp_deinit_container(&tz2_name_images[i]);
-      bmp_deinit_container(&tz3_name_images[i]);
+      light_enable(true);
+      light_timer = LIGHT_TIMER_SECONDS;
+   }
+   else
+   {
+      light_enable(false);
+      light_timer = 0;
+   }
+}  // accel_tap_handler()
+
+
+void handle_second_tick(struct tm *tick_time, TimeUnits units_changed)
+{
+   time_t t = time(NULL);
+   struct tm *current_time = localtime(&t);
+
+   if (splash_timer > 0)
+   {
+      splash_timer--;
+
+      if (splash_timer == 0)
+      {
+         set_bitmap_image(&splash_image, splash_layer, RESOURCE_ID_IMAGE_WHITE_BACK, GPoint (0, 0));
+      }
+   }
+   else
+   {
+      if (light_timer > 0)
+      {
+         light_timer--;
+
+         if (light_timer == 0)
+         {
+            light_enable(false);
+            light_on = false;
+         }
+      }
+
+      if (app_state != APP_IDLE_STATE)
+      {
+         if (setmode_timer > 0)
+         {
+            setmode_timer--;
+
+            if (setmode_timer == 0)
+            {
+               app_state = APP_IDLE_STATE;
+            }
+         }
+      }
+
+      if (switch_seconds != 0)
+      {
+         switch_seconds--;
+      }
    }
 
-   for (int i = 0; i < TOTAL_TIME_IMAGES; i++)
-   {
-      bmp_deinit_container(&local_digits_images[i]);
-      bmp_deinit_container(&tz1_digits_images[i]);
-      bmp_deinit_container(&tz2_digits_images[i]);
-      bmp_deinit_container(&tz3_digits_images[i]);
-   }
-}  // handle_deinit()
+   update_display(current_time);
+}  // handle_second_tick()
 
 
-void handle_init(AppContextRef ctx)
+static void init(void)
 {
-   (void)ctx;
+   time_t t = time(NULL);
+   struct tm *current_time = localtime(&t);
 
-   window_init(&window, "TZplus");
-   window_set_fullscreen(&window, true);
-   window_stack_push(&window, true /* Animated */);
+   GRect dummy_frame = { {0, 0}, {0, 0} };
 
-   resource_init_current_app(&APP_RESOURCES);
+   window = window_create();
 
-   // Attach custom button functionality
-   window_set_click_config_provider(&window, (ClickConfigProvider) click_config_provider);
+   if (window == NULL)
+   {
+      APP_LOG(APP_LOG_LEVEL_DEBUG, "...couldn't allocate window memory...");
+      return;
+   }
 
-   // version 1.1 of SDK requires manual initialization of vars
-   // START manual var initialization
-   current_time.tm_year = 0;
-   previous_time.tm_year = 0;
+   // Get all settings from persistent storage for use if they exist, otherwise use the default
+   display_is_local = persist_exists(PKEY_DISPLAY_IS_LOCAL) ? persist_read_int(PKEY_DISPLAY_IS_LOCAL) : DISPLAY_IS_LOCAL_DEFAULT;
+   local_index = persist_exists(PKEY_LOCAL_INDEX) ? persist_read_int(PKEY_LOCAL_INDEX) : LOCAL_INDEX_DEFAULT;
+   tz1_index = persist_exists(PKEY_TZ1_INDEX) ? persist_read_int(PKEY_TZ1_INDEX) : TZ1_INDEX_DEFAULT;
+   tz2_index = persist_exists(PKEY_TZ2_INDEX) ? persist_read_int(PKEY_TZ2_INDEX) : TZ2_INDEX_DEFAULT;
+   tz3_index = persist_exists(PKEY_TZ3_INDEX) ? persist_read_int(PKEY_TZ3_INDEX) : TZ3_INDEX_DEFAULT;
 
-   current_time_local.tm_year = 0;
-   current_time1.tm_year = 0;
-   current_time2.tm_year = 0;
-   current_time3.tm_year = 0;
+   window_set_fullscreen(window, true);
+   window_stack_push(window, true /* Animated */);
+   Layer *window_layer = window_get_root_layer(window);
 
-   setmode_timer = SETMODE_SECONDS;
-   switch_seconds = 0;
+   window_set_click_config_provider(window, click_config_provider);
 
-   toggle_flag = false;
-   display_is_local = false;
+   if ((current_time->tm_hour >= 6) && (current_time->tm_hour <= 18))
+   {
+      splash_image = gbitmap_create_with_resource(RESOURCE_ID_IMAGE_SPLASH);
+   }
+   else
+   {
+      splash_image = gbitmap_create_with_resource(RESOURCE_ID_IMAGE_INV_SPLASH);
+   }
+   splash_layer = bitmap_layer_create(dummy_frame);
+   bitmap_layer_set_bitmap(splash_layer, splash_image);
+   layer_add_child(window_layer, bitmap_layer_get_layer(splash_layer));
+ 
+   tz1_name_image = gbitmap_create_with_resource(RESOURCE_ID_IMAGE_DAY_UTC); 
+   tz1_name_layer = bitmap_layer_create(dummy_frame);
+   bitmap_layer_set_bitmap(tz1_name_layer, tz1_name_image);
+   layer_add_child(window_layer, bitmap_layer_get_layer(tz1_name_layer));
 
-   local_index = 20; // local=CDT
-   local_offset_hours = 0;
-   local_offset_mins = 0;
+   tz2_name_image = gbitmap_create_with_resource(RESOURCE_ID_IMAGE_DAY_UTC); 
+   tz2_name_layer = bitmap_layer_create(dummy_frame);
+   bitmap_layer_set_bitmap(tz2_name_layer, tz2_name_image);
+   layer_add_child(window_layer, bitmap_layer_get_layer(tz2_name_layer));
 
-   tz1_index = 27; // New York
-   tz1_offset_hours = 0;
-   tz1_offset_mins = 0;
+   tz3_name_image = gbitmap_create_with_resource(RESOURCE_ID_IMAGE_DAY_UTC); 
+   tz3_name_layer = bitmap_layer_create(dummy_frame);
+   bitmap_layer_set_bitmap(tz3_name_layer, tz3_name_image);
+   layer_add_child(window_layer, bitmap_layer_get_layer(tz3_name_layer));
 
-   tz2_index = 38; // London
-   tz2_offset_hours = 0;
-   tz2_offset_mins = 0;
+   for (int i = 0; i < TOTAL_IMAGES; i++)
+   {
+      tz1_digits_image[i] = gbitmap_create_with_resource(RESOURCE_ID_IMAGE_DAY_TIME_0); 
+      tz1_digits_layer[i] = bitmap_layer_create(dummy_frame);
+      bitmap_layer_set_bitmap(tz1_digits_layer[i], tz1_digits_image[i]);
+      layer_add_child(window_layer, bitmap_layer_get_layer(tz1_digits_layer[i]));
 
-   tz3_index = 80; // Tokyo
-   tz3_offset_hours = 0;
-   tz3_offset_mins = 0;
+      tz2_digits_image[i] = gbitmap_create_with_resource(RESOURCE_ID_IMAGE_DAY_TIME_0); 
+      tz2_digits_layer[i] = bitmap_layer_create(dummy_frame);
+      bitmap_layer_set_bitmap(tz2_digits_layer[i], tz2_digits_image[i]);
+      layer_add_child(window_layer, bitmap_layer_get_layer(tz2_digits_layer[i]));
+
+      tz3_digits_image[i] = gbitmap_create_with_resource(RESOURCE_ID_IMAGE_DAY_TIME_0); 
+      tz3_digits_layer[i] = bitmap_layer_create(dummy_frame);
+      bitmap_layer_set_bitmap(tz3_digits_layer[i], tz3_digits_image[i]);
+      layer_add_child(window_layer, bitmap_layer_get_layer(tz3_digits_layer[i]));
+   }
+
+   if ((current_time->tm_hour >= 6) && (current_time->tm_hour <= 18))
+   {
+      set_bitmap_image(&splash_image, splash_layer, RESOURCE_ID_IMAGE_SPLASH, GPoint (0, 0));
+   }
+   else
+   {
+      set_bitmap_image(&splash_image, splash_layer, RESOURCE_ID_IMAGE_INV_SPLASH, GPoint (0, 0));
+   }
+
+   accel_tap_service_subscribe(&handle_accel_tap);
+   tick_timer_service_subscribe(SECOND_UNIT, &handle_second_tick);
 
    app_state = APP_IDLE_STATE;
-
-   for (int i = 0; i < TOTAL_NAME_IMAGES; i++)
-   {
-      bmp_init_container(RESOURCE_ID_IMAGE_DAY_TIME_BLANK, &local_name_images[i]);
-      bmp_init_container(RESOURCE_ID_IMAGE_DAY_TIME_BLANK, &tz1_name_images[i]);
-      bmp_init_container(RESOURCE_ID_IMAGE_DAY_TIME_BLANK, &tz2_name_images[i]);
-      bmp_init_container(RESOURCE_ID_IMAGE_DAY_TIME_BLANK, &tz3_name_images[i]);
-   }
-   for (int i = 0; i < TOTAL_TIME_IMAGES; i++)
-   {
-      bmp_init_container(RESOURCE_ID_IMAGE_DAY_TIME_BLANK, &local_digits_images[i]);
-      bmp_init_container(RESOURCE_ID_IMAGE_DAY_TIME_BLANK, &tz1_digits_images[i]);
-      bmp_init_container(RESOURCE_ID_IMAGE_DAY_TIME_BLANK, &tz2_digits_images[i]);
-      bmp_init_container(RESOURCE_ID_IMAGE_DAY_TIME_BLANK, &tz3_digits_images[i]);
-   }
-   // END manual var initialization
 
    local_offset_hours = timezones[local_index].offset_hours;
    local_offset_mins = timezones[local_index].offset_mins;
@@ -1267,67 +1397,13 @@ void handle_init(AppContextRef ctx)
    tz3_offset_hours = timezones [tz3_index].offset_hours;
    tz3_offset_mins = timezones [tz3_index].offset_mins;
 
-   // invalidate initial previous_time;
-   previous_time.tm_min = -1;
-   previous_time.tm_hour = -1;
-
    // kick initial display
-   PblTm kick_time;
-
-   get_time(&kick_time);
-
-   update_display(&kick_time);
-}  // handle_init()
+   update_display(current_time);
+}  // init()
 
 
-void handle_second_tick(AppContextRef ctx, PebbleTickEvent *t)
+static void select_long_click_handler(ClickRecognizerRef recognizer, void *context)
 {
-   (void)ctx;
-
-   if (app_state != APP_IDLE_STATE)
-   {
-      if (setmode_timer > 0)
-      {
-         setmode_timer--;
-
-         if (setmode_timer == 0)
-         {
-            app_state = APP_IDLE_STATE;
-
-            // invalidate initial previous_time;
-            previous_time.tm_min = -1;
-            previous_time.tm_hour = -1;
-         }
-      }
-   }
-
-   if (switch_seconds != 0)
-   {
-      switch_seconds--;
-
-      if (switch_seconds == 0)
-      {
-         // invalidate initial previous_time;
-         previous_time.tm_min = -1;
-         previous_time.tm_hour = -1;
-      }
-   }
-
-   if ((app_state != APP_IDLE_STATE) ||
-       (t->tick_time->tm_min != previous_time.tm_min) ||
-       (t->tick_time->tm_hour != previous_time.tm_hour) ||
-       (switch_seconds != 0))
-   {
-      update_display(t->tick_time);
-   }
-}  // handle_second_tick()
-
-
-void select_long_click_handler(ClickRecognizerRef recognizer, Window *window)
-{
-   (void)recognizer;
-   (void)window;
-
    if (app_state == APP_IDLE_STATE)
    {
       app_state = APP_SET_LOCAL_STATE;
@@ -1337,32 +1413,26 @@ void select_long_click_handler(ClickRecognizerRef recognizer, Window *window)
       switch_seconds = SWITCH_SECONDS;
 
       display_is_local = true;
+
+      // save display_is_local into persistant storage
+      persist_write_int(PKEY_DISPLAY_IS_LOCAL, display_is_local);
    }
    else
    {
       app_state = APP_IDLE_STATE;
 
       setmode_timer = 0;
-
-      // invalidate initial previous_time;
-      previous_time.tm_min = -1;
-      previous_time.tm_hour = -1;
    }
 }  // select_long_click_handler()
 
 
-void select_long_release_handler(ClickRecognizerRef recognizer, Window *window)
+static void select_long_release_handler(ClickRecognizerRef recognizer, void *context)
 {
-   (void)recognizer;
-   (void)window;
 }  // select_long_release_handler()
 
 
-void select_single_click_handler(ClickRecognizerRef recognizer, Window *window)
+static void select_single_click_handler(ClickRecognizerRef recognizer, void *context)
 {
-   (void)recognizer;
-   (void)window;
-
    if (app_state != APP_IDLE_STATE)
    {
       app_state++;
@@ -1371,12 +1441,20 @@ void select_single_click_handler(ClickRecognizerRef recognizer, Window *window)
       {
          case APP_SET_TZ1_STATE:
             display_is_local = false;
+
+            // save display_is_local into persistant storage
+            persist_write_int(PKEY_DISPLAY_IS_LOCAL, display_is_local);
+
             switch_seconds = SWITCH_SECONDS;
             break;
 
          case STATE_COUNT:
             app_state = APP_SET_LOCAL_STATE;
             display_is_local = true;
+
+            // save display_is_local into persistant storage
+            persist_write_int(PKEY_DISPLAY_IS_LOCAL, display_is_local);
+
             switch_seconds = SWITCH_SECONDS;
             break;
       }
@@ -1385,34 +1463,55 @@ void select_single_click_handler(ClickRecognizerRef recognizer, Window *window)
    }
    else
    {
-      switch_seconds = SWITCH_SECONDS;
+      if (light_timer == 4)
+      {
+         switch_seconds = SWITCH_SECONDS;
 
-      display_is_local = !display_is_local;
+         display_is_local = !display_is_local;
+
+         // save display_is_local into persistant storage
+         persist_write_int(PKEY_DISPLAY_IS_LOCAL, display_is_local);
+
+         light_on = true;
+         light_enable(true);
+      }
+      else
+      {
+         light_timer = 4;
+
+         light_on = !light_on;
+
+         if (light_on)
+         {
+            light_enable(true);
+         }
+         else
+         {
+            light_enable(false);
+         }
+      }
    }
 }  // select_single_click_handler()
 
 
-void set_container_image(BmpContainer *bmp_container, const int resource_id, GPoint origin)
+static void set_bitmap_image(GBitmap **bmp_image, BitmapLayer *bmp_layer, const int resource_id, GPoint this_origin)
 {
-   layer_remove_from_parent(&bmp_container->layer.layer);
-   bmp_deinit_container(bmp_container);
+   gbitmap_destroy(*bmp_image);
 
-   bmp_init_container(resource_id, bmp_container);
+   *bmp_image = gbitmap_create_with_resource(resource_id);
+   GRect frame = (GRect)
+   {
+      .origin = this_origin,
+      .size = (*bmp_image)->bounds.size
+   };
+   bitmap_layer_set_compositing_mode(bmp_layer, GCompOpAssign);
+   layer_set_frame(bitmap_layer_get_layer(bmp_layer), frame);
+   bitmap_layer_set_bitmap(bmp_layer, *bmp_image);
+}  // set_bitmap_image()
 
-   GRect frame = layer_get_frame(&bmp_container->layer.layer);
-   frame.origin.x = origin.x;
-   frame.origin.y = origin.y;
-   layer_set_frame(&bmp_container->layer.layer, frame);
 
-   layer_add_child(&window.layer, &bmp_container->layer.layer);
-}  // set_container_image()
-
-
-void up_single_click_handler(ClickRecognizerRef recognizer, Window *window)
+static void up_single_click_handler(ClickRecognizerRef recognizer, void *context)
 {
-   (void)recognizer;
-   (void)window;
-
    switch (app_state)
    {
       case APP_SET_LOCAL_STATE:
@@ -1420,12 +1519,11 @@ void up_single_click_handler(ClickRecognizerRef recognizer, Window *window)
          {
             local_index--;
 
+            // save local_index into persistent storage
+            persist_write_int(PKEY_LOCAL_INDEX, local_index);
+
             local_offset_hours = timezones[local_index].offset_hours;
             local_offset_mins = timezones[local_index].offset_mins;
-
-            // invalidate initial previous_time;
-            previous_time.tm_min = -1;
-            previous_time.tm_hour = -1;
          }
 
          setmode_timer = SETMODE_SECONDS;
@@ -1435,6 +1533,9 @@ void up_single_click_handler(ClickRecognizerRef recognizer, Window *window)
          if (tz1_index > 0)
          {
             tz1_index--;
+
+            // save tz1_index into persistent storage
+            persist_write_int(PKEY_TZ1_INDEX, tz1_index);
 
             tz1_offset_hours = timezones[tz1_index].offset_hours;
             tz1_offset_mins = timezones[tz1_index].offset_mins;
@@ -1448,6 +1549,9 @@ void up_single_click_handler(ClickRecognizerRef recognizer, Window *window)
          {
             tz2_index--;
 
+            // save tz2_index into persistent storage
+            persist_write_int(PKEY_TZ2_INDEX, tz2_index);
+
             tz2_offset_hours = timezones[tz2_index].offset_hours;
             tz2_offset_mins = timezones[tz2_index].offset_mins;
          }
@@ -1460,6 +1564,9 @@ void up_single_click_handler(ClickRecognizerRef recognizer, Window *window)
          {
             tz3_index--;
 
+            // save tz3_index into persistent storage
+            persist_write_int(PKEY_TZ3_INDEX, tz3_index);
+
             tz3_offset_hours = timezones[tz3_index].offset_hours;
             tz3_offset_mins = timezones[tz3_index].offset_mins;
          }
@@ -1470,14 +1577,10 @@ void up_single_click_handler(ClickRecognizerRef recognizer, Window *window)
       default:
          break;
    }
-
-   // invalidate initial previous_time;
-   previous_time.tm_min = -1;
-   previous_time.tm_hour = -1;
 }  // up_single_click_handler()
 
 
-void update_display(PblTm *current_time)
+static void update_display(struct tm *current_time)
 {
    toggle_flag = !toggle_flag;
 
@@ -1513,39 +1616,43 @@ void update_display(PblTm *current_time)
       }
    }
 
-   if (display_is_local == true)
-   {
-      display_local();
-   }
-   else
-   {
-      display_tz1();
-   }
+    if (splash_timer == 0)
+    {
+      if (display_is_local == true)
+      {
+         display_local();
+      }
+      else
+      {
+         display_tz1();
+      }
 
-   display_tz2();
-   display_tz3();
+      display_tz2();
+      display_tz3();
+    }
 
-   previous_time = *current_time;
    current_time_local = *current_time;
    current_time1 = *current_time;
    current_time2 = *current_time;
    current_time3 = *current_time;
+
+   Layer *window_layer = window_get_root_layer(window);
+   layer_mark_dirty(window_layer);
 }  // update_display()
 
 
-void pbl_main(void *params)
+int main(void)
 {
-   PebbleAppHandlers handlers =
-   {
-      .init_handler = &handle_init,
-      .deinit_handler = &handle_deinit,
+   init();
+   app_event_loop();
+   deinit();
+}  // main()
 
-      .tick_info =
-      {
-         .tick_handler = &handle_second_tick,
-         .tick_units = SECOND_UNIT
-      }
-   };
-   app_event_loop(params, &handlers);
-}  // pbl_main()
+
+
+
+
+
+
+
 
