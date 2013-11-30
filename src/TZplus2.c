@@ -8,11 +8,11 @@ static Window *window;
 
 // This is a custom defined key for saving the local_index
 #define PKEY_LOCAL_INDEX 26543
-#define LOCAL_INDEX_DEFAULT 20 // local=CDT
+#define LOCAL_INDEX_DEFAULT 15 // local=CST
 
 // This is a custom defined key for saving the tz1_index
 #define PKEY_TZ1_INDEX 32654
-#define TZ1_INDEX_DEFAULT 27 // New York
+#define TZ1_INDEX_DEFAULT 24 // New York
 
 // This is a custom defined key for saving the tz2_index
 #define PKEY_TZ2_INDEX 43265
@@ -140,12 +140,12 @@ timezone_t timezones[] =
    { .day_image_id = RESOURCE_ID_IMAGE_DAY_UTC_MINUS_5,       .night_image_id = RESOURCE_ID_IMAGE_NIGHT_UTC_MINUS_5,       .offset_hours =  -5,  .offset_mins =   0 },  // 019
    { .day_image_id = RESOURCE_ID_IMAGE_DAY_CDT,               .night_image_id = RESOURCE_ID_IMAGE_NIGHT_CDT,               .offset_hours =  -5,  .offset_mins =   0 },  // 020
    { .day_image_id = RESOURCE_ID_IMAGE_DAY_EST,               .night_image_id = RESOURCE_ID_IMAGE_NIGHT_EST,               .offset_hours =  -5,  .offset_mins =   0 },  // 021
-   { .day_image_id = RESOURCE_ID_IMAGE_DAY_MIAMI,             .night_image_id = RESOURCE_ID_IMAGE_NIGHT_MIAMI,             .offset_hours =  -5,  .offset_mins =   0 },  // 022
-   { .day_image_id = RESOURCE_ID_IMAGE_DAY_DETROIT,           .night_image_id = RESOURCE_ID_IMAGE_NIGHT_DETROIT,           .offset_hours =  -5,  .offset_mins =   0 },  // 023
-   { .day_image_id = RESOURCE_ID_IMAGE_DAY_UTC_MINUS_4_30,    .night_image_id = RESOURCE_ID_IMAGE_NIGHT_UTC_MINUS_4_30,    .offset_hours =  -4,  .offset_mins = -30 },  // 024
-   { .day_image_id = RESOURCE_ID_IMAGE_DAY_UTC_MINUS_4,       .night_image_id = RESOURCE_ID_IMAGE_NIGHT_UTC_MINUS_4,       .offset_hours =  -4,  .offset_mins =   0 },  // 025
-   { .day_image_id = RESOURCE_ID_IMAGE_DAY_EDT,               .night_image_id = RESOURCE_ID_IMAGE_NIGHT_EDT,               .offset_hours =  -4,  .offset_mins =   0 },  // 026
-   { .day_image_id = RESOURCE_ID_IMAGE_DAY_NEWYORK,           .night_image_id = RESOURCE_ID_IMAGE_NIGHT_NEWYORK,           .offset_hours =  -4,  .offset_mins =   0 },  // 027
+   { .day_image_id = RESOURCE_ID_IMAGE_DAY_DETROIT,           .night_image_id = RESOURCE_ID_IMAGE_NIGHT_DETROIT,           .offset_hours =  -5,  .offset_mins =   0 },  // 022
+   { .day_image_id = RESOURCE_ID_IMAGE_DAY_MIAMI,             .night_image_id = RESOURCE_ID_IMAGE_NIGHT_MIAMI,             .offset_hours =  -5,  .offset_mins =   0 },  // 023
+   { .day_image_id = RESOURCE_ID_IMAGE_DAY_NEWYORK,           .night_image_id = RESOURCE_ID_IMAGE_NIGHT_NEWYORK,           .offset_hours =  -5,  .offset_mins =   0 },  // 024
+   { .day_image_id = RESOURCE_ID_IMAGE_DAY_UTC_MINUS_4_30,    .night_image_id = RESOURCE_ID_IMAGE_NIGHT_UTC_MINUS_4_30,    .offset_hours =  -4,  .offset_mins = -30 },  // 025
+   { .day_image_id = RESOURCE_ID_IMAGE_DAY_UTC_MINUS_4,       .night_image_id = RESOURCE_ID_IMAGE_NIGHT_UTC_MINUS_4,       .offset_hours =  -4,  .offset_mins =   0 },  // 026
+   { .day_image_id = RESOURCE_ID_IMAGE_DAY_EDT,               .night_image_id = RESOURCE_ID_IMAGE_NIGHT_EDT,               .offset_hours =  -4,  .offset_mins =   0 },  // 027
    { .day_image_id = RESOURCE_ID_IMAGE_DAY_SANJUAN,           .night_image_id = RESOURCE_ID_IMAGE_NIGHT_SANJUAN,           .offset_hours =  -4,  .offset_mins =   0 },  // 028
    { .day_image_id = RESOURCE_ID_IMAGE_DAY_UTC_MINUS_3_30,    .night_image_id = RESOURCE_ID_IMAGE_NIGHT_UTC_MINUS_3_30,    .offset_hours =  -3,  .offset_mins = -30 },  // 029
    { .day_image_id = RESOURCE_ID_IMAGE_DAY_UTC_MINUS_3,       .night_image_id = RESOURCE_ID_IMAGE_NIGHT_UTC_MINUS_3,       .offset_hours =  -3,  .offset_mins =   0 },  // 030

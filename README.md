@@ -8,7 +8,10 @@ loads as an app (at the same menu level as
 "Settings" on the Pebble), not as a watchface
 . . . it just displays a watchface
 
-Features (v2.0):
+Corrections (v2.1):
+- corrected New York offset
+
+Features (v2.1):
 - select and display three timezones, plus local time,
   selectable on-the-fly (no recompile required) from
   a picklist of locations and timezones
