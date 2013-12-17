@@ -1,6 +1,22 @@
+/* * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * */
+/* * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * */
+/* *                                                                 * */
+/* *                            TZplus2                              * */
+/* *                                                                 * */
+/* *      A watchface to display three timezones + local time        * */
+/* *                                                                 * */
+/* *                 [ SDK 2.0 compatible version ]                  * */
+/* *                                                                 * */
+/* *                    by Mark J Culross, KD5RXT                    * */
+/* *                                                                 * */
+/* * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * */
+/* * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * */
+
+
 #include <pebble.h>
 
 static Window *window;
+static Layer *window_layer;
 
 // This is a custom defined key for saving the display_is_local flag
 #define PKEY_DISPLAY_IS_LOCAL 65432
@@ -30,13 +46,8 @@ static Window *window;
 
 typedef enum {APP_IDLE_STATE = 0, APP_SET_LOCAL_STATE, APP_SET_TZ1_STATE, APP_SET_TZ2_STATE, APP_SET_TZ3_STATE, STATE_COUNT} APP_STATE;
 
-struct tm current_time_local;
-struct tm current_time1;
-struct tm current_time2;
-struct tm current_time3;
-
 int setmode_timer = SETMODE_SECONDS;
-int switch_seconds = 0;
+int switch_seconds = SWITCH_SECONDS;
 int light_timer = LIGHT_TIMER_SECONDS;
 
 bool toggle_flag = false;
@@ -45,23 +56,12 @@ bool display_is_local = DISPLAY_IS_LOCAL_DEFAULT;
 bool light_on = false;
 
 int local_index = LOCAL_INDEX_DEFAULT;
-int local_offset_hours = 0;
-int local_offset_mins = 0;
-
 int tz1_index = TZ1_INDEX_DEFAULT;
-int tz1_offset_hours = 0;
-int tz1_offset_mins = 0;
-
 int tz2_index = TZ2_INDEX_DEFAULT;
-int tz2_offset_hours = 0;
-int tz2_offset_mins = 0;
-
 int tz3_index = TZ3_INDEX_DEFAULT;
-int tz3_offset_hours = 0;
-int tz3_offset_mins = 0;
 
 int app_state = APP_IDLE_STATE;
-int splash_timer = 3;
+int splash_timer = 5;
 
 GBitmap *tz1_name_image;
 GBitmap *tz2_name_image;
@@ -71,46 +71,25 @@ GBitmap *tz2_digits_image[TOTAL_IMAGES];
 GBitmap *tz3_digits_image[TOTAL_IMAGES];
 GBitmap *splash_image;
 
-BitmapLayer *tz1_name_layer;
-BitmapLayer *tz2_name_layer;
-BitmapLayer *tz3_name_layer;
-BitmapLayer *tz1_digits_layer[TOTAL_IMAGES];
-BitmapLayer *tz2_digits_layer[TOTAL_IMAGES];
-BitmapLayer *tz3_digits_layer[TOTAL_IMAGES];
 BitmapLayer *splash_layer;
 
-const int DAY_TIME_IMAGE_RESOURCE_IDS[] =
+const int TIME_IMAGE_RESOURCE_IDS[] =
 {
-   RESOURCE_ID_IMAGE_DAY_TIME_0,
-   RESOURCE_ID_IMAGE_DAY_TIME_1,
-   RESOURCE_ID_IMAGE_DAY_TIME_2,
-   RESOURCE_ID_IMAGE_DAY_TIME_3,
-   RESOURCE_ID_IMAGE_DAY_TIME_4,
-   RESOURCE_ID_IMAGE_DAY_TIME_5,
-   RESOURCE_ID_IMAGE_DAY_TIME_6,
-   RESOURCE_ID_IMAGE_DAY_TIME_7,
-   RESOURCE_ID_IMAGE_DAY_TIME_8,
-   RESOURCE_ID_IMAGE_DAY_TIME_9,
-};
-
-const int NIGHT_TIME_IMAGE_RESOURCE_IDS[] =
-{
-   RESOURCE_ID_IMAGE_NIGHT_TIME_0,
-   RESOURCE_ID_IMAGE_NIGHT_TIME_1,
-   RESOURCE_ID_IMAGE_NIGHT_TIME_2,
-   RESOURCE_ID_IMAGE_NIGHT_TIME_3,
-   RESOURCE_ID_IMAGE_NIGHT_TIME_4,
-   RESOURCE_ID_IMAGE_NIGHT_TIME_5,
-   RESOURCE_ID_IMAGE_NIGHT_TIME_6,
-   RESOURCE_ID_IMAGE_NIGHT_TIME_7,
-   RESOURCE_ID_IMAGE_NIGHT_TIME_8,
-   RESOURCE_ID_IMAGE_NIGHT_TIME_9,
+   RESOURCE_ID_IMAGE_TIME_0,
+   RESOURCE_ID_IMAGE_TIME_1,
+   RESOURCE_ID_IMAGE_TIME_2,
+   RESOURCE_ID_IMAGE_TIME_3,
+   RESOURCE_ID_IMAGE_TIME_4,
+   RESOURCE_ID_IMAGE_TIME_5,
+   RESOURCE_ID_IMAGE_TIME_6,
+   RESOURCE_ID_IMAGE_TIME_7,
+   RESOURCE_ID_IMAGE_TIME_8,
+   RESOURCE_ID_IMAGE_TIME_9,
 };
 
 typedef struct
 {
-   int day_image_id;
-   int night_image_id;
+   int image_id;
    int offset_hours;
    int offset_mins;
 } timezone_t;
@@ -118,108 +97,105 @@ typedef struct
 
 timezone_t timezones[] =
 {
-   { .day_image_id = RESOURCE_ID_IMAGE_DAY_UTC_MINUS_11,      .night_image_id = RESOURCE_ID_IMAGE_NIGHT_UTC_MINUS_11,      .offset_hours = -11,  .offset_mins =   0 },  // 000
-   { .day_image_id = RESOURCE_ID_IMAGE_DAY_UTC_MINUS_10,      .night_image_id = RESOURCE_ID_IMAGE_NIGHT_UTC_MINUS_10,      .offset_hours = -10,  .offset_mins =   0 },  // 001
-   { .day_image_id = RESOURCE_ID_IMAGE_DAY_HAWAII,            .night_image_id = RESOURCE_ID_IMAGE_NIGHT_HAWAII,            .offset_hours = -10,  .offset_mins =   0 },  // 002
-   { .day_image_id = RESOURCE_ID_IMAGE_DAY_UTC_MINUS_9,       .night_image_id = RESOURCE_ID_IMAGE_NIGHT_UTC_MINUS_9,       .offset_hours =  -9,  .offset_mins =   0 },  // 003
-   { .day_image_id = RESOURCE_ID_IMAGE_DAY_ALASKA,            .night_image_id = RESOURCE_ID_IMAGE_NIGHT_ALASKA,            .offset_hours =  -9,  .offset_mins =   0 },  // 004
-   { .day_image_id = RESOURCE_ID_IMAGE_DAY_UTC_MINUS_8,       .night_image_id = RESOURCE_ID_IMAGE_NIGHT_UTC_MINUS_8,       .offset_hours =  -8,  .offset_mins =   0 },  // 005
-   { .day_image_id = RESOURCE_ID_IMAGE_DAY_PST,               .night_image_id = RESOURCE_ID_IMAGE_NIGHT_PST,               .offset_hours =  -8,  .offset_mins =   0 },  // 006
-   { .day_image_id = RESOURCE_ID_IMAGE_DAY_LOSANGELES,        .night_image_id = RESOURCE_ID_IMAGE_NIGHT_LOSANGELES,        .offset_hours =  -8,  .offset_mins =   0 },  // 007
-   { .day_image_id = RESOURCE_ID_IMAGE_DAY_UTC_MINUS_7,       .night_image_id = RESOURCE_ID_IMAGE_NIGHT_UTC_MINUS_7,       .offset_hours =  -7,  .offset_mins =   0 },  // 008
-   { .day_image_id = RESOURCE_ID_IMAGE_DAY_PDT,               .night_image_id = RESOURCE_ID_IMAGE_NIGHT_PDT,               .offset_hours =  -7,  .offset_mins =   0 },  // 009
-   { .day_image_id = RESOURCE_ID_IMAGE_DAY_MST,               .night_image_id = RESOURCE_ID_IMAGE_NIGHT_MST,               .offset_hours =  -7,  .offset_mins =   0 },  // 010
-   { .day_image_id = RESOURCE_ID_IMAGE_DAY_DENVER,            .night_image_id = RESOURCE_ID_IMAGE_NIGHT_DENVER,            .offset_hours =  -7,  .offset_mins =   0 },  // 011
-   { .day_image_id = RESOURCE_ID_IMAGE_DAY_PHOENIX,           .night_image_id = RESOURCE_ID_IMAGE_NIGHT_PHOENIX,           .offset_hours =  -7,  .offset_mins =   0 },  // 012
-   { .day_image_id = RESOURCE_ID_IMAGE_DAY_UTC_MINUS_6,       .night_image_id = RESOURCE_ID_IMAGE_NIGHT_UTC_MINUS_6,       .offset_hours =  -6,  .offset_mins =   0 },  // 013
-   { .day_image_id = RESOURCE_ID_IMAGE_DAY_MDT,               .night_image_id = RESOURCE_ID_IMAGE_NIGHT_MDT,               .offset_hours =  -6,  .offset_mins =   0 },  // 014
-   { .day_image_id = RESOURCE_ID_IMAGE_DAY_CST,               .night_image_id = RESOURCE_ID_IMAGE_NIGHT_CST,               .offset_hours =  -6,  .offset_mins =   0 },  // 015
-   { .day_image_id = RESOURCE_ID_IMAGE_DAY_ATLANTA,           .night_image_id = RESOURCE_ID_IMAGE_NIGHT_ATLANTA,           .offset_hours =  -6,  .offset_mins =   0 },  // 016
-   { .day_image_id = RESOURCE_ID_IMAGE_DAY_DALLAS,            .night_image_id = RESOURCE_ID_IMAGE_NIGHT_DALLAS,            .offset_hours =  -6,  .offset_mins =   0 },  // 017
-   { .day_image_id = RESOURCE_ID_IMAGE_DAY_STLOUIS,           .night_image_id = RESOURCE_ID_IMAGE_NIGHT_STLOUIS,           .offset_hours =  -6,  .offset_mins =   0 },  // 018
-   { .day_image_id = RESOURCE_ID_IMAGE_DAY_UTC_MINUS_5,       .night_image_id = RESOURCE_ID_IMAGE_NIGHT_UTC_MINUS_5,       .offset_hours =  -5,  .offset_mins =   0 },  // 019
-   { .day_image_id = RESOURCE_ID_IMAGE_DAY_CDT,               .night_image_id = RESOURCE_ID_IMAGE_NIGHT_CDT,               .offset_hours =  -5,  .offset_mins =   0 },  // 020
-   { .day_image_id = RESOURCE_ID_IMAGE_DAY_EST,               .night_image_id = RESOURCE_ID_IMAGE_NIGHT_EST,               .offset_hours =  -5,  .offset_mins =   0 },  // 021
-   { .day_image_id = RESOURCE_ID_IMAGE_DAY_DETROIT,           .night_image_id = RESOURCE_ID_IMAGE_NIGHT_DETROIT,           .offset_hours =  -5,  .offset_mins =   0 },  // 022
-   { .day_image_id = RESOURCE_ID_IMAGE_DAY_MIAMI,             .night_image_id = RESOURCE_ID_IMAGE_NIGHT_MIAMI,             .offset_hours =  -5,  .offset_mins =   0 },  // 023
-   { .day_image_id = RESOURCE_ID_IMAGE_DAY_NEWYORK,           .night_image_id = RESOURCE_ID_IMAGE_NIGHT_NEWYORK,           .offset_hours =  -5,  .offset_mins =   0 },  // 024
-   { .day_image_id = RESOURCE_ID_IMAGE_DAY_UTC_MINUS_4_30,    .night_image_id = RESOURCE_ID_IMAGE_NIGHT_UTC_MINUS_4_30,    .offset_hours =  -4,  .offset_mins = -30 },  // 025
-   { .day_image_id = RESOURCE_ID_IMAGE_DAY_UTC_MINUS_4,       .night_image_id = RESOURCE_ID_IMAGE_NIGHT_UTC_MINUS_4,       .offset_hours =  -4,  .offset_mins =   0 },  // 026
-   { .day_image_id = RESOURCE_ID_IMAGE_DAY_EDT,               .night_image_id = RESOURCE_ID_IMAGE_NIGHT_EDT,               .offset_hours =  -4,  .offset_mins =   0 },  // 027
-   { .day_image_id = RESOURCE_ID_IMAGE_DAY_SANJUAN,           .night_image_id = RESOURCE_ID_IMAGE_NIGHT_SANJUAN,           .offset_hours =  -4,  .offset_mins =   0 },  // 028
-   { .day_image_id = RESOURCE_ID_IMAGE_DAY_UTC_MINUS_3_30,    .night_image_id = RESOURCE_ID_IMAGE_NIGHT_UTC_MINUS_3_30,    .offset_hours =  -3,  .offset_mins = -30 },  // 029
-   { .day_image_id = RESOURCE_ID_IMAGE_DAY_UTC_MINUS_3,       .night_image_id = RESOURCE_ID_IMAGE_NIGHT_UTC_MINUS_3,       .offset_hours =  -3,  .offset_mins =   0 },  // 030
-   { .day_image_id = RESOURCE_ID_IMAGE_DAY_GREENLAND,         .night_image_id = RESOURCE_ID_IMAGE_NIGHT_GREENLAND,         .offset_hours =  -3,  .offset_mins =   0 },  // 031
-   { .day_image_id = RESOURCE_ID_IMAGE_DAY_SALVADOR,          .night_image_id = RESOURCE_ID_IMAGE_NIGHT_SALVADOR,          .offset_hours =  -3,  .offset_mins =   0 },  // 032
-   { .day_image_id = RESOURCE_ID_IMAGE_DAY_UTC_MINUS_2,       .night_image_id = RESOURCE_ID_IMAGE_NIGHT_UTC_MINUS_2,       .offset_hours =  -2,  .offset_mins =   0 },  // 033
-   { .day_image_id = RESOURCE_ID_IMAGE_DAY_UTC_MINUS_1,       .night_image_id = RESOURCE_ID_IMAGE_NIGHT_UTC_MINUS_1,       .offset_hours =  -1,  .offset_mins =   0 },  // 034
-   { .day_image_id = RESOURCE_ID_IMAGE_DAY_AZORES,            .night_image_id = RESOURCE_ID_IMAGE_NIGHT_AZORES,            .offset_hours =  -1,  .offset_mins =   0 },  // 035
-   { .day_image_id = RESOURCE_ID_IMAGE_DAY_UTC,               .night_image_id = RESOURCE_ID_IMAGE_NIGHT_UTC,               .offset_hours =   0,  .offset_mins =   0 },  // 036
-   { .day_image_id = RESOURCE_ID_IMAGE_DAY_EDINBURGH,         .night_image_id = RESOURCE_ID_IMAGE_NIGHT_EDINBURGH,         .offset_hours =   0,  .offset_mins =   0 },  // 037
-   { .day_image_id = RESOURCE_ID_IMAGE_DAY_LONDON,            .night_image_id = RESOURCE_ID_IMAGE_NIGHT_LONDON,            .offset_hours =   0,  .offset_mins =   0 },  // 038
-   { .day_image_id = RESOURCE_ID_IMAGE_DAY_REYKJAVIK,         .night_image_id = RESOURCE_ID_IMAGE_NIGHT_REYKJAVIK,         .offset_hours =   0,  .offset_mins =   0 },  // 039
-   { .day_image_id = RESOURCE_ID_IMAGE_DAY_UTC_PLUS_1,        .night_image_id = RESOURCE_ID_IMAGE_NIGHT_UTC_PLUS_1,        .offset_hours =  +1,  .offset_mins =   0 },  // 040
-   { .day_image_id = RESOURCE_ID_IMAGE_DAY_AMSTERDAM,         .night_image_id = RESOURCE_ID_IMAGE_NIGHT_AMSTERDAM,         .offset_hours =  +1,  .offset_mins =   0 },  // 041
-   { .day_image_id = RESOURCE_ID_IMAGE_DAY_BERLIN,            .night_image_id = RESOURCE_ID_IMAGE_NIGHT_BERLIN,            .offset_hours =  +1,  .offset_mins =   0 },  // 042
-   { .day_image_id = RESOURCE_ID_IMAGE_DAY_ROME,              .night_image_id = RESOURCE_ID_IMAGE_NIGHT_ROME,              .offset_hours =  +1,  .offset_mins =   0 },  // 043
-   { .day_image_id = RESOURCE_ID_IMAGE_DAY_STOCKHOLM,         .night_image_id = RESOURCE_ID_IMAGE_NIGHT_STOCKHOLM,         .offset_hours =  +1,  .offset_mins =   0 },  // 044
-   { .day_image_id = RESOURCE_ID_IMAGE_DAY_BRUSSELS,          .night_image_id = RESOURCE_ID_IMAGE_NIGHT_BRUSSELS,          .offset_hours =  +1,  .offset_mins =   0 },  // 045
-   { .day_image_id = RESOURCE_ID_IMAGE_DAY_COPENHAGEN,        .night_image_id = RESOURCE_ID_IMAGE_NIGHT_COPENHAGEN,        .offset_hours =  +1,  .offset_mins =   0 },  // 046
-   { .day_image_id = RESOURCE_ID_IMAGE_DAY_PARIS,             .night_image_id = RESOURCE_ID_IMAGE_NIGHT_PARIS,             .offset_hours =  +1,  .offset_mins =   0 },  // 047
-   { .day_image_id = RESOURCE_ID_IMAGE_DAY_UTC_PLUS_2,        .night_image_id = RESOURCE_ID_IMAGE_NIGHT_UTC_PLUS_2,        .offset_hours =  +2,  .offset_mins =   0 },  // 048
-   { .day_image_id = RESOURCE_ID_IMAGE_DAY_ATHENS,            .night_image_id = RESOURCE_ID_IMAGE_NIGHT_ATHENS,            .offset_hours =  +2,  .offset_mins =   0 },  // 049
-   { .day_image_id = RESOURCE_ID_IMAGE_DAY_BEIRUT,            .night_image_id = RESOURCE_ID_IMAGE_NIGHT_BEIRUT,            .offset_hours =  +2,  .offset_mins =   0 },  // 050
-   { .day_image_id = RESOURCE_ID_IMAGE_DAY_CAIRO,             .night_image_id = RESOURCE_ID_IMAGE_NIGHT_CAIRO,             .offset_hours =  +2,  .offset_mins =   0 },  // 051
-   { .day_image_id = RESOURCE_ID_IMAGE_DAY_HELSINKI,          .night_image_id = RESOURCE_ID_IMAGE_NIGHT_HELSINKI,          .offset_hours =  +2,  .offset_mins =   0 },  // 052
-   { .day_image_id = RESOURCE_ID_IMAGE_DAY_JERUSALEM,         .night_image_id = RESOURCE_ID_IMAGE_NIGHT_JERUSALEM,         .offset_hours =  +2,  .offset_mins =   0 },  // 053
-   { .day_image_id = RESOURCE_ID_IMAGE_DAY_UTC_PLUS_3,        .night_image_id = RESOURCE_ID_IMAGE_NIGHT_UTC_PLUS_3,        .offset_hours =  +3,  .offset_mins =   0 },  // 054
-   { .day_image_id = RESOURCE_ID_IMAGE_DAY_BAGHDAD,           .night_image_id = RESOURCE_ID_IMAGE_NIGHT_BAGHDAD,           .offset_hours =  +3,  .offset_mins =   0 },  // 055
-   { .day_image_id = RESOURCE_ID_IMAGE_DAY_KUWAIT,            .night_image_id = RESOURCE_ID_IMAGE_NIGHT_KUWAIT,            .offset_hours =  +3,  .offset_mins =   0 },  // 056
-   { .day_image_id = RESOURCE_ID_IMAGE_DAY_RIYADH,            .night_image_id = RESOURCE_ID_IMAGE_NIGHT_RIYADH,            .offset_hours =  +3,  .offset_mins =   0 },  // 057
-   { .day_image_id = RESOURCE_ID_IMAGE_DAY_UTC_PLUS_3_30,     .night_image_id = RESOURCE_ID_IMAGE_NIGHT_UTC_PLUS_3_30,     .offset_hours =  +3,  .offset_mins = +30 },  // 058
-   { .day_image_id = RESOURCE_ID_IMAGE_DAY_UTC_PLUS_4,        .night_image_id = RESOURCE_ID_IMAGE_NIGHT_UTC_PLUS_4,        .offset_hours =  +4,  .offset_mins =   0 },  // 059
-   { .day_image_id = RESOURCE_ID_IMAGE_DAY_ABUDHABI,          .night_image_id = RESOURCE_ID_IMAGE_NIGHT_ABUDHABI,          .offset_hours =  +4,  .offset_mins =   0 },  // 060
-   { .day_image_id = RESOURCE_ID_IMAGE_DAY_MOSCOW,            .night_image_id = RESOURCE_ID_IMAGE_NIGHT_MOSCOW,            .offset_hours =  +4,  .offset_mins =   0 },  // 061
-   { .day_image_id = RESOURCE_ID_IMAGE_DAY_UTC_PLUS_4_30,     .night_image_id = RESOURCE_ID_IMAGE_NIGHT_UTC_PLUS_4_30,     .offset_hours =  +4,  .offset_mins = +30 },  // 062
-   { .day_image_id = RESOURCE_ID_IMAGE_DAY_KABUL,             .night_image_id = RESOURCE_ID_IMAGE_NIGHT_KABUL,             .offset_hours =  +4,  .offset_mins = +30 },  // 063
-   { .day_image_id = RESOURCE_ID_IMAGE_DAY_UTC_PLUS_5,        .night_image_id = RESOURCE_ID_IMAGE_NIGHT_UTC_PLUS_5,        .offset_hours =  +5,  .offset_mins =   0 },  // 064
-   { .day_image_id = RESOURCE_ID_IMAGE_DAY_UTC_PLUS_5_30,     .night_image_id = RESOURCE_ID_IMAGE_NIGHT_UTC_PLUS_5_30,     .offset_hours =  +5,  .offset_mins = +30 },  // 065
-   { .day_image_id = RESOURCE_ID_IMAGE_DAY_NEWDELHI,          .night_image_id = RESOURCE_ID_IMAGE_NIGHT_NEWDELHI,          .offset_hours =  +5,  .offset_mins = +30 },  // 066
-   { .day_image_id = RESOURCE_ID_IMAGE_DAY_UTC_PLUS_5_45,     .night_image_id = RESOURCE_ID_IMAGE_NIGHT_UTC_PLUS_5_45,     .offset_hours =  +5,  .offset_mins = +45 },  // 067
-   { .day_image_id = RESOURCE_ID_IMAGE_DAY_KATHMANDU,         .night_image_id = RESOURCE_ID_IMAGE_NIGHT_KATHMANDU,         .offset_hours =  +5,  .offset_mins = +45 },  // 068
-   { .day_image_id = RESOURCE_ID_IMAGE_DAY_UTC_PLUS_6,        .night_image_id = RESOURCE_ID_IMAGE_NIGHT_UTC_PLUS_6,        .offset_hours =  +6,  .offset_mins =   0 },  // 069
-   { .day_image_id = RESOURCE_ID_IMAGE_DAY_UTC_PLUS_6_30,     .night_image_id = RESOURCE_ID_IMAGE_NIGHT_UTC_PLUS_6_30,     .offset_hours =  +6,  .offset_mins = +30 },  // 070
-   { .day_image_id = RESOURCE_ID_IMAGE_DAY_UTC_PLUS_7,        .night_image_id = RESOURCE_ID_IMAGE_NIGHT_UTC_PLUS_7,        .offset_hours =  +7,  .offset_mins =   0 },  // 071
-   { .day_image_id = RESOURCE_ID_IMAGE_DAY_HANOI,             .night_image_id = RESOURCE_ID_IMAGE_NIGHT_HANOI,             .offset_hours =  +7,  .offset_mins =   0 },  // 072
-   { .day_image_id = RESOURCE_ID_IMAGE_DAY_JAKARTA,           .night_image_id = RESOURCE_ID_IMAGE_NIGHT_JAKARTA,           .offset_hours =  +7,  .offset_mins =   0 },  // 073
-   { .day_image_id = RESOURCE_ID_IMAGE_DAY_UTC_PLUS_8,        .night_image_id = RESOURCE_ID_IMAGE_NIGHT_UTC_PLUS_8,        .offset_hours =  +8,  .offset_mins =   0 },  // 074
-   { .day_image_id = RESOURCE_ID_IMAGE_DAY_BEIJING,           .night_image_id = RESOURCE_ID_IMAGE_NIGHT_BEIJING,           .offset_hours =  +8,  .offset_mins =   0 },  // 075
-   { .day_image_id = RESOURCE_ID_IMAGE_DAY_HONGKONG,          .night_image_id = RESOURCE_ID_IMAGE_NIGHT_HONGKONG,          .offset_hours =  +8,  .offset_mins =   0 },  // 076
-   { .day_image_id = RESOURCE_ID_IMAGE_DAY_SINGAPORE,         .night_image_id = RESOURCE_ID_IMAGE_NIGHT_SINGAPORE,         .offset_hours =  +8,  .offset_mins =   0 },  // 077
-   { .day_image_id = RESOURCE_ID_IMAGE_DAY_TAIPEI,            .night_image_id = RESOURCE_ID_IMAGE_NIGHT_TAIPEI,            .offset_hours =  +8,  .offset_mins =   0 },  // 078
-   { .day_image_id = RESOURCE_ID_IMAGE_DAY_UTC_PLUS_9,        .night_image_id = RESOURCE_ID_IMAGE_NIGHT_UTC_PLUS_9,        .offset_hours =  +9,  .offset_mins =   0 },  // 079
-   { .day_image_id = RESOURCE_ID_IMAGE_DAY_TOKYO,             .night_image_id = RESOURCE_ID_IMAGE_NIGHT_TOKYO,             .offset_hours =  +9,  .offset_mins =   0 },  // 080
-   { .day_image_id = RESOURCE_ID_IMAGE_DAY_SEOUL,             .night_image_id = RESOURCE_ID_IMAGE_NIGHT_SEOUL,             .offset_hours =  +9,  .offset_mins =   0 },  // 081
-   { .day_image_id = RESOURCE_ID_IMAGE_DAY_UTC_PLUS_9_30,     .night_image_id = RESOURCE_ID_IMAGE_NIGHT_UTC_PLUS_9_30,     .offset_hours =  +9,  .offset_mins = +30 },  // 082
-   { .day_image_id = RESOURCE_ID_IMAGE_DAY_UTC_PLUS_10,       .night_image_id = RESOURCE_ID_IMAGE_NIGHT_UTC_PLUS_10,       .offset_hours =  +10, .offset_mins =   0 },  // 083
-   { .day_image_id = RESOURCE_ID_IMAGE_DAY_SYDNEY,            .night_image_id = RESOURCE_ID_IMAGE_NIGHT_SYDNEY,            .offset_hours =  +10, .offset_mins =   0 },  // 084
-   { .day_image_id = RESOURCE_ID_IMAGE_DAY_GUAM,              .night_image_id = RESOURCE_ID_IMAGE_NIGHT_GUAM,              .offset_hours =  +10, .offset_mins =   0 },  // 085
-   { .day_image_id = RESOURCE_ID_IMAGE_DAY_UTC_PLUS_11,       .night_image_id = RESOURCE_ID_IMAGE_NIGHT_UTC_PLUS_11,       .offset_hours =  +11, .offset_mins =   0 },  // 086
-   { .day_image_id = RESOURCE_ID_IMAGE_DAY_UTC_PLUS_12,       .night_image_id = RESOURCE_ID_IMAGE_NIGHT_UTC_PLUS_12,       .offset_hours =  +12, .offset_mins =   0 },  // 087
-   { .day_image_id = RESOURCE_ID_IMAGE_DAY_FIJI,              .night_image_id = RESOURCE_ID_IMAGE_NIGHT_FIJI,              .offset_hours =  +12, .offset_mins =   0 },  // 088
-   { .day_image_id = RESOURCE_ID_IMAGE_DAY_UTC_PLUS_13,       .night_image_id = RESOURCE_ID_IMAGE_NIGHT_UTC_PLUS_13,       .offset_hours =  +13, .offset_mins =   0 },  // 089
-   { .day_image_id = RESOURCE_ID_IMAGE_DAY_SAMOA,             .night_image_id = RESOURCE_ID_IMAGE_NIGHT_SAMOA,             .offset_hours =  +13, .offset_mins =   0 },  // 090
-   { .day_image_id = RESOURCE_ID_IMAGE_DAY_UTC_PLUS_14,       .night_image_id = RESOURCE_ID_IMAGE_NIGHT_UTC_PLUS_14,       .offset_hours =  +14, .offset_mins =   0 },  // 091
+   { .image_id = RESOURCE_ID_IMAGE_UTC_MINUS_11,      .offset_hours = -11,  .offset_mins =   0 },  // 000
+   { .image_id = RESOURCE_ID_IMAGE_UTC_MINUS_10,      .offset_hours = -10,  .offset_mins =   0 },  // 001
+   { .image_id = RESOURCE_ID_IMAGE_HAWAII,            .offset_hours = -10,  .offset_mins =   0 },  // 002
+   { .image_id = RESOURCE_ID_IMAGE_UTC_MINUS_9,       .offset_hours =  -9,  .offset_mins =   0 },  // 003
+   { .image_id = RESOURCE_ID_IMAGE_ALASKA,            .offset_hours =  -9,  .offset_mins =   0 },  // 004
+   { .image_id = RESOURCE_ID_IMAGE_UTC_MINUS_8,       .offset_hours =  -8,  .offset_mins =   0 },  // 005
+   { .image_id = RESOURCE_ID_IMAGE_PST,               .offset_hours =  -8,  .offset_mins =   0 },  // 006
+   { .image_id = RESOURCE_ID_IMAGE_LOSANGELES,        .offset_hours =  -8,  .offset_mins =   0 },  // 007
+   { .image_id = RESOURCE_ID_IMAGE_UTC_MINUS_7,       .offset_hours =  -7,  .offset_mins =   0 },  // 008
+   { .image_id = RESOURCE_ID_IMAGE_PDT,               .offset_hours =  -7,  .offset_mins =   0 },  // 009
+   { .image_id = RESOURCE_ID_IMAGE_MST,               .offset_hours =  -7,  .offset_mins =   0 },  // 010
+   { .image_id = RESOURCE_ID_IMAGE_DENVER,            .offset_hours =  -7,  .offset_mins =   0 },  // 011
+   { .image_id = RESOURCE_ID_IMAGE_PHOENIX,           .offset_hours =  -7,  .offset_mins =   0 },  // 012
+   { .image_id = RESOURCE_ID_IMAGE_UTC_MINUS_6,       .offset_hours =  -6,  .offset_mins =   0 },  // 013
+   { .image_id = RESOURCE_ID_IMAGE_MDT,               .offset_hours =  -6,  .offset_mins =   0 },  // 014
+   { .image_id = RESOURCE_ID_IMAGE_CST,               .offset_hours =  -6,  .offset_mins =   0 },  // 015
+   { .image_id = RESOURCE_ID_IMAGE_ATLANTA,           .offset_hours =  -6,  .offset_mins =   0 },  // 016
+   { .image_id = RESOURCE_ID_IMAGE_DALLAS,            .offset_hours =  -6,  .offset_mins =   0 },  // 017
+   { .image_id = RESOURCE_ID_IMAGE_STLOUIS,           .offset_hours =  -6,  .offset_mins =   0 },  // 018
+   { .image_id = RESOURCE_ID_IMAGE_UTC_MINUS_5,       .offset_hours =  -5,  .offset_mins =   0 },  // 019
+   { .image_id = RESOURCE_ID_IMAGE_CDT,               .offset_hours =  -5,  .offset_mins =   0 },  // 020
+   { .image_id = RESOURCE_ID_IMAGE_EST,               .offset_hours =  -5,  .offset_mins =   0 },  // 021
+   { .image_id = RESOURCE_ID_IMAGE_DETROIT,           .offset_hours =  -5,  .offset_mins =   0 },  // 022
+   { .image_id = RESOURCE_ID_IMAGE_MIAMI,             .offset_hours =  -5,  .offset_mins =   0 },  // 023
+   { .image_id = RESOURCE_ID_IMAGE_NEWYORK,           .offset_hours =  -5,  .offset_mins =   0 },  // 024
+   { .image_id = RESOURCE_ID_IMAGE_UTC_MINUS_4_30,    .offset_hours =  -4,  .offset_mins = -30 },  // 025
+   { .image_id = RESOURCE_ID_IMAGE_UTC_MINUS_4,       .offset_hours =  -4,  .offset_mins =   0 },  // 026
+   { .image_id = RESOURCE_ID_IMAGE_EDT,               .offset_hours =  -4,  .offset_mins =   0 },  // 027
+   { .image_id = RESOURCE_ID_IMAGE_SANJUAN,           .offset_hours =  -4,  .offset_mins =   0 },  // 028
+   { .image_id = RESOURCE_ID_IMAGE_UTC_MINUS_3_30,    .offset_hours =  -3,  .offset_mins = -30 },  // 029
+   { .image_id = RESOURCE_ID_IMAGE_UTC_MINUS_3,       .offset_hours =  -3,  .offset_mins =   0 },  // 030
+   { .image_id = RESOURCE_ID_IMAGE_GREENLAND,         .offset_hours =  -3,  .offset_mins =   0 },  // 031
+   { .image_id = RESOURCE_ID_IMAGE_SALVADOR,          .offset_hours =  -3,  .offset_mins =   0 },  // 032
+   { .image_id = RESOURCE_ID_IMAGE_UTC_MINUS_2,       .offset_hours =  -2,  .offset_mins =   0 },  // 033
+   { .image_id = RESOURCE_ID_IMAGE_UTC_MINUS_1,       .offset_hours =  -1,  .offset_mins =   0 },  // 034
+   { .image_id = RESOURCE_ID_IMAGE_AZORES,            .offset_hours =  -1,  .offset_mins =   0 },  // 035
+   { .image_id = RESOURCE_ID_IMAGE_UTC,               .offset_hours =   0,  .offset_mins =   0 },  // 036
+   { .image_id = RESOURCE_ID_IMAGE_EDINBURGH,         .offset_hours =   0,  .offset_mins =   0 },  // 037
+   { .image_id = RESOURCE_ID_IMAGE_LONDON,            .offset_hours =   0,  .offset_mins =   0 },  // 038
+   { .image_id = RESOURCE_ID_IMAGE_REYKJAVIK,         .offset_hours =   0,  .offset_mins =   0 },  // 039
+   { .image_id = RESOURCE_ID_IMAGE_UTC_PLUS_1,        .offset_hours =  +1,  .offset_mins =   0 },  // 040
+   { .image_id = RESOURCE_ID_IMAGE_AMSTERDAM,         .offset_hours =  +1,  .offset_mins =   0 },  // 041
+   { .image_id = RESOURCE_ID_IMAGE_BERLIN,            .offset_hours =  +1,  .offset_mins =   0 },  // 042
+   { .image_id = RESOURCE_ID_IMAGE_ROME,              .offset_hours =  +1,  .offset_mins =   0 },  // 043
+   { .image_id = RESOURCE_ID_IMAGE_STOCKHOLM,         .offset_hours =  +1,  .offset_mins =   0 },  // 044
+   { .image_id = RESOURCE_ID_IMAGE_BRUSSELS,          .offset_hours =  +1,  .offset_mins =   0 },  // 045
+   { .image_id = RESOURCE_ID_IMAGE_COPENHAGEN,        .offset_hours =  +1,  .offset_mins =   0 },  // 046
+   { .image_id = RESOURCE_ID_IMAGE_PARIS,             .offset_hours =  +1,  .offset_mins =   0 },  // 047
+   { .image_id = RESOURCE_ID_IMAGE_UTC_PLUS_2,        .offset_hours =  +2,  .offset_mins =   0 },  // 048
+   { .image_id = RESOURCE_ID_IMAGE_ATHENS,            .offset_hours =  +2,  .offset_mins =   0 },  // 049
+   { .image_id = RESOURCE_ID_IMAGE_BEIRUT,            .offset_hours =  +2,  .offset_mins =   0 },  // 050
+   { .image_id = RESOURCE_ID_IMAGE_CAIRO,             .offset_hours =  +2,  .offset_mins =   0 },  // 051
+   { .image_id = RESOURCE_ID_IMAGE_HELSINKI,          .offset_hours =  +2,  .offset_mins =   0 },  // 052
+   { .image_id = RESOURCE_ID_IMAGE_JERUSALEM,         .offset_hours =  +2,  .offset_mins =   0 },  // 053
+   { .image_id = RESOURCE_ID_IMAGE_UTC_PLUS_3,        .offset_hours =  +3,  .offset_mins =   0 },  // 054
+   { .image_id = RESOURCE_ID_IMAGE_BAGHDAD,           .offset_hours =  +3,  .offset_mins =   0 },  // 055
+   { .image_id = RESOURCE_ID_IMAGE_KUWAIT,            .offset_hours =  +3,  .offset_mins =   0 },  // 056
+   { .image_id = RESOURCE_ID_IMAGE_RIYADH,            .offset_hours =  +3,  .offset_mins =   0 },  // 057
+   { .image_id = RESOURCE_ID_IMAGE_UTC_PLUS_3_30,     .offset_hours =  +3,  .offset_mins = +30 },  // 058
+   { .image_id = RESOURCE_ID_IMAGE_UTC_PLUS_4,        .offset_hours =  +4,  .offset_mins =   0 },  // 059
+   { .image_id = RESOURCE_ID_IMAGE_ABUDHABI,          .offset_hours =  +4,  .offset_mins =   0 },  // 060
+   { .image_id = RESOURCE_ID_IMAGE_MOSCOW,            .offset_hours =  +4,  .offset_mins =   0 },  // 061
+   { .image_id = RESOURCE_ID_IMAGE_UTC_PLUS_4_30,     .offset_hours =  +4,  .offset_mins = +30 },  // 062
+   { .image_id = RESOURCE_ID_IMAGE_KABUL,             .offset_hours =  +4,  .offset_mins = +30 },  // 063
+   { .image_id = RESOURCE_ID_IMAGE_UTC_PLUS_5,        .offset_hours =  +5,  .offset_mins =   0 },  // 064
+   { .image_id = RESOURCE_ID_IMAGE_UTC_PLUS_5_30,     .offset_hours =  +5,  .offset_mins = +30 },  // 065
+   { .image_id = RESOURCE_ID_IMAGE_NEWDELHI,          .offset_hours =  +5,  .offset_mins = +30 },  // 066
+   { .image_id = RESOURCE_ID_IMAGE_UTC_PLUS_5_45,     .offset_hours =  +5,  .offset_mins = +45 },  // 067
+   { .image_id = RESOURCE_ID_IMAGE_KATHMANDU,         .offset_hours =  +5,  .offset_mins = +45 },  // 068
+   { .image_id = RESOURCE_ID_IMAGE_UTC_PLUS_6,        .offset_hours =  +6,  .offset_mins =   0 },  // 069
+   { .image_id = RESOURCE_ID_IMAGE_UTC_PLUS_6_30,     .offset_hours =  +6,  .offset_mins = +30 },  // 070
+   { .image_id = RESOURCE_ID_IMAGE_UTC_PLUS_7,        .offset_hours =  +7,  .offset_mins =   0 },  // 071
+   { .image_id = RESOURCE_ID_IMAGE_HANOI,             .offset_hours =  +7,  .offset_mins =   0 },  // 072
+   { .image_id = RESOURCE_ID_IMAGE_JAKARTA,           .offset_hours =  +7,  .offset_mins =   0 },  // 073
+   { .image_id = RESOURCE_ID_IMAGE_UTC_PLUS_8,        .offset_hours =  +8,  .offset_mins =   0 },  // 074
+   { .image_id = RESOURCE_ID_IMAGE_BEIJING,           .offset_hours =  +8,  .offset_mins =   0 },  // 075
+   { .image_id = RESOURCE_ID_IMAGE_HONGKONG,          .offset_hours =  +8,  .offset_mins =   0 },  // 076
+   { .image_id = RESOURCE_ID_IMAGE_SINGAPORE,         .offset_hours =  +8,  .offset_mins =   0 },  // 077
+   { .image_id = RESOURCE_ID_IMAGE_TAIPEI,            .offset_hours =  +8,  .offset_mins =   0 },  // 078
+   { .image_id = RESOURCE_ID_IMAGE_UTC_PLUS_9,        .offset_hours =  +9,  .offset_mins =   0 },  // 079
+   { .image_id = RESOURCE_ID_IMAGE_TOKYO,             .offset_hours =  +9,  .offset_mins =   0 },  // 080
+   { .image_id = RESOURCE_ID_IMAGE_SEOUL,             .offset_hours =  +9,  .offset_mins =   0 },  // 081
+   { .image_id = RESOURCE_ID_IMAGE_UTC_PLUS_9_30,     .offset_hours =  +9,  .offset_mins = +30 },  // 082
+   { .image_id = RESOURCE_ID_IMAGE_UTC_PLUS_10,       .offset_hours =  +10, .offset_mins =   0 },  // 083
+   { .image_id = RESOURCE_ID_IMAGE_SYDNEY,            .offset_hours =  +10, .offset_mins =   0 },  // 084
+   { .image_id = RESOURCE_ID_IMAGE_GUAM,              .offset_hours =  +10, .offset_mins =   0 },  // 085
+   { .image_id = RESOURCE_ID_IMAGE_UTC_PLUS_11,       .offset_hours =  +11, .offset_mins =   0 },  // 086
+   { .image_id = RESOURCE_ID_IMAGE_UTC_PLUS_12,       .offset_hours =  +12, .offset_mins =   0 },  // 087
+   { .image_id = RESOURCE_ID_IMAGE_FIJI,              .offset_hours =  +12, .offset_mins =   0 },  // 088
+   { .image_id = RESOURCE_ID_IMAGE_UTC_PLUS_13,       .offset_hours =  +13, .offset_mins =   0 },  // 089
+   { .image_id = RESOURCE_ID_IMAGE_SAMOA,             .offset_hours =  +13, .offset_mins =   0 },  // 090
+   { .image_id = RESOURCE_ID_IMAGE_UTC_PLUS_14,       .offset_hours =  +14, .offset_mins =   0 },  // 091
 };
 
 
 
 static void click_config_provider(void *config);
 static void deinit(void);
-static void display_local(void);
-static void display_tz1(void);
-static void display_tz2(void);
-static void display_tz3(void);
+static void display_time(GContext *ctx, int yloc, int timeslot, int index);
 static void down_single_click_handler(ClickRecognizerRef recognizer, void *context);
 static void handle_accel_tap(AccelAxisType axis, int32_t direction);
 static void handle_second_tick(struct tm *tick, TimeUnits units_changed);
@@ -227,9 +203,9 @@ static void init(void);
 static void select_long_click_handler(ClickRecognizerRef recognizer, void *context);
 static void select_long_release_handler(ClickRecognizerRef recognizer, void *context);
 static void select_single_click_handler(ClickRecognizerRef recognizer, void *context);
-static void set_bitmap_image(GBitmap **bmp_image, BitmapLayer *bmp_layer, const int resource_id, GPoint this_origin);
+static void set_bitmap_image(GContext *ctx, GBitmap **bmp_image, const int resource_id, GPoint this_origin, bool invert);
 static void up_single_click_handler(ClickRecognizerRef recognizer, void *context);
-static void update_display(struct tm *current_time);
+static void update_display(Layer *layer, GContext *ctx);
 
 
 static void click_config_provider(void *config)
@@ -250,36 +226,20 @@ static void deinit(void)
    persist_write_int(PKEY_TZ2_INDEX, tz2_index);
    persist_write_int(PKEY_TZ3_INDEX, tz3_index);
 
-   layer_remove_from_parent(bitmap_layer_get_layer(tz1_name_layer));
-   bitmap_layer_destroy(tz1_name_layer);
-   gbitmap_destroy(tz1_name_image);
-
-   layer_remove_from_parent(bitmap_layer_get_layer(tz2_name_layer));
-   bitmap_layer_destroy(tz2_name_layer);
-   gbitmap_destroy(tz2_name_image);
-
-   layer_remove_from_parent(bitmap_layer_get_layer(tz3_name_layer));
-   bitmap_layer_destroy(tz3_name_layer);
-   gbitmap_destroy(tz3_name_image);
-
-   for (int i = 0; i < TOTAL_IMAGES; i++)
-   {
-      layer_remove_from_parent(bitmap_layer_get_layer(tz1_digits_layer[i]));
-      bitmap_layer_destroy(tz1_digits_layer[i]);
-      gbitmap_destroy(tz1_digits_image[i]);
-
-      layer_remove_from_parent(bitmap_layer_get_layer(tz2_digits_layer[i]));
-      bitmap_layer_destroy(tz2_digits_layer[i]);
-      gbitmap_destroy(tz2_digits_image[i]);
-
-      layer_remove_from_parent(bitmap_layer_get_layer(tz3_digits_layer[i]));
-      bitmap_layer_destroy(tz3_digits_layer[i]);
-      gbitmap_destroy(tz3_digits_image[i]);
-   }
-
    layer_remove_from_parent(bitmap_layer_get_layer(splash_layer));
    bitmap_layer_destroy(splash_layer);
    gbitmap_destroy(splash_image);
+
+   gbitmap_destroy(tz1_name_image); 
+   gbitmap_destroy(tz2_name_image); 
+   gbitmap_destroy(tz3_name_image); 
+
+   for (int i = 0; i < TOTAL_IMAGES; i++)
+   {
+      gbitmap_destroy(tz1_digits_image[i]); 
+      gbitmap_destroy(tz2_digits_image[i]); 
+      gbitmap_destroy(tz3_digits_image[i]); 
+   }
 
    tick_timer_service_unsubscribe();
    accel_tap_service_unsubscribe();
@@ -287,878 +247,322 @@ static void deinit(void)
 }  // deinit()
 
 
-static void display_local(void)
+static void display_time(GContext *ctx, int yloc, int timeslot, int index)
 {
-   int yloc = 20;
+   time_t t = time(NULL);
+   struct tm *current_time = localtime(&t);
+
    int resource_id_1;
    int resource_id_2;
    int resource_id_3;
+   bool night_mode;
 
-   current_time_local.tm_min += local_offset_mins;
+   current_time->tm_min -= timezones[local_index].offset_mins;
 
-   if (current_time_local.tm_min >= 60)
+   if (current_time->tm_min < 0)
    {
-      current_time_local.tm_min %= 60;
+      current_time->tm_min += 60;
 
-      current_time_local.tm_hour += 1;
+      current_time->tm_hour -= 1;
    }
    else
    {
-      if (current_time_local.tm_min < 0)
+      if (current_time->tm_min >= 60)
       {
-         current_time_local.tm_min += 60;
+         current_time->tm_min %= 60;
 
-         current_time_local.tm_hour -= 1;
+         current_time->tm_hour += 1;
       }
    }
 
-   current_time_local.tm_hour += local_offset_hours;
+   current_time->tm_hour -= timezones[local_index].offset_hours;
 
-   if (current_time_local.tm_hour >= 24)
+   if (current_time->tm_hour < 0)
    {
-      current_time_local.tm_hour %= 24;
-
-      if ((current_time_local.tm_hour >= 6) && (current_time_local.tm_hour <= 18))
-      {
-         // display + offset
-         resource_id_1 = RESOURCE_ID_IMAGE_DAY_TIME_PLUS;
-      }
-      else
-      {
-         // display + offset
-         resource_id_1 = RESOURCE_ID_IMAGE_NIGHT_TIME_PLUS;
-      }
+      current_time->tm_hour += 24;
    }
    else
    {
-      if (current_time_local.tm_hour < 0)
+      if (current_time->tm_hour >= 24)
       {
-         current_time_local.tm_hour += 24;
-
-         if ((current_time_local.tm_hour >= 6) && (current_time_local.tm_hour <= 18))
-         {
-            // display - offset
-            resource_id_1 = RESOURCE_ID_IMAGE_DAY_TIME_MINUS;
-         }
-         else
-         {
-            // display - offset
-            resource_id_1 = RESOURCE_ID_IMAGE_NIGHT_TIME_MINUS;
-         }
-      }
-      else
-      {
-         if ((current_time_local.tm_hour >= 6) && (current_time_local.tm_hour <= 18))
-         {
-            // display no offset
-            resource_id_1 = RESOURCE_ID_IMAGE_DAY_TIME_NONE;
-         }
-         else
-         {
-            // display no offset
-            resource_id_1 = RESOURCE_ID_IMAGE_NIGHT_TIME_NONE;
-         }
+         current_time->tm_hour %= 24;
       }
    }
 
-   set_bitmap_image(&tz1_digits_image[5], tz1_digits_layer[5], resource_id_1, GPoint(114, yloc));
+   current_time->tm_min += timezones[index].offset_mins;
 
-   // display local name
-   if (app_state == APP_SET_LOCAL_STATE)
+   if (current_time->tm_min >= 60)
    {
-      if (switch_seconds != 0)
-      {
-         if (toggle_flag == false)
-         {
-            resource_id_1 = RESOURCE_ID_IMAGE_DAY_LOCAL;
-         }
-         else
-         {
-            resource_id_1 = RESOURCE_ID_IMAGE_NIGHT_LOCAL;
-         }
-      }
-      else
-      {
-         if (toggle_flag == false)
-         {
-            resource_id_1 = timezones[local_index].day_image_id;
-         }
-         else
-         {
-            resource_id_1 = timezones[local_index].night_image_id;
-         }
-      }
+      current_time->tm_min %= 60;
+
+      current_time->tm_hour += 1;
    }
    else
    {
-      if (switch_seconds != 0)
+      if (current_time->tm_min < 0)
       {
-         if ((current_time_local.tm_hour >= 6) && (current_time_local.tm_hour <= 18))
-         {
-            resource_id_1 = RESOURCE_ID_IMAGE_DAY_LOCAL;
-         }
-         else
-         {
-            resource_id_1 = RESOURCE_ID_IMAGE_NIGHT_LOCAL;
-         }
-      }
-      else
-      {
-         if ((current_time_local.tm_hour >= 6) && (current_time_local.tm_hour <= 18))
-         {
-            resource_id_1 = timezones[local_index].day_image_id;
-         }
-         else
-         {
-            resource_id_1 = timezones[local_index].night_image_id;
-         }
+         current_time->tm_min += 60;
+
+         current_time->tm_hour -= 1;
       }
    }
 
-   set_bitmap_image(&tz1_name_image, tz1_name_layer, resource_id_1, GPoint(0, yloc - 20));
+   current_time->tm_hour += timezones[index].offset_hours;
 
-   // display time hour
-   if (clock_is_24h_style())
+   if (current_time->tm_hour >= 24)
    {
-      if ((current_time_local.tm_hour >= 6) && (current_time_local.tm_hour <= 18))
-      {
-         resource_id_1 = DAY_TIME_IMAGE_RESOURCE_IDS[current_time_local.tm_hour / 10];
-         resource_id_2 = DAY_TIME_IMAGE_RESOURCE_IDS[current_time_local.tm_hour % 10];
+      current_time->tm_hour %= 24;
 
-         // display no AM/PM
-         resource_id_3 = RESOURCE_ID_IMAGE_DAY_TIME_NONE;
-      }
-      else
-      {
-         resource_id_1 = NIGHT_TIME_IMAGE_RESOURCE_IDS[current_time_local.tm_hour / 10];
-         resource_id_2 = NIGHT_TIME_IMAGE_RESOURCE_IDS[current_time_local.tm_hour % 10];
-
-         // display no AM/PM
-         resource_id_3 = RESOURCE_ID_IMAGE_NIGHT_TIME_NONE;
-      }
+      // display + offset
+      resource_id_1 = RESOURCE_ID_IMAGE_TIME_PLUS;
    }
    else
    {
-      // display AM/PM
-      if (current_time_local.tm_hour >= 12)
+      if (current_time->tm_hour < 0)
       {
-         if (current_time_local.tm_hour <= 18)
-         {
-            resource_id_3 = RESOURCE_ID_IMAGE_DAY_TIME_PM;
-         }
-         else
-         {
-            resource_id_3 = RESOURCE_ID_IMAGE_NIGHT_TIME_PM;
-         }
+         current_time->tm_hour += 24;
+
+         // display - offset
+         resource_id_1 = RESOURCE_ID_IMAGE_TIME_MINUS;
       }
       else
       {
-         if (current_time_local.tm_hour >= 6)
-         {
-            resource_id_3 = RESOURCE_ID_IMAGE_DAY_TIME_AM;
-         }
-         else
-         {
-            resource_id_3 = RESOURCE_ID_IMAGE_NIGHT_TIME_AM;
-         }
+         // display no offset
+         resource_id_1 = RESOURCE_ID_IMAGE_TIME_NONE;
       }
+   }
 
-      if ((current_time_local.tm_hour % 12) == 0)
-      {
-         if ((current_time_local.tm_hour >= 6) && (current_time_local.tm_hour <= 18))
-         {
-            resource_id_1 = DAY_TIME_IMAGE_RESOURCE_IDS[1];
-            resource_id_2 = DAY_TIME_IMAGE_RESOURCE_IDS[2];
-         }
-         else
-         {
-            resource_id_1 = NIGHT_TIME_IMAGE_RESOURCE_IDS[1];
-            resource_id_2 = NIGHT_TIME_IMAGE_RESOURCE_IDS[2];
-         }
-      }
-      else
-      {
-         if ((current_time_local.tm_hour >= 6) && (current_time_local.tm_hour <= 18))
-         {
-            resource_id_1 = DAY_TIME_IMAGE_RESOURCE_IDS[(current_time_local.tm_hour % 12) / 10];
-            resource_id_2 = DAY_TIME_IMAGE_RESOURCE_IDS[(current_time_local.tm_hour % 12) % 10];
-         }
-         else
-         {
-            resource_id_1 = NIGHT_TIME_IMAGE_RESOURCE_IDS[(current_time_local.tm_hour % 12) / 10];
-            resource_id_2 = NIGHT_TIME_IMAGE_RESOURCE_IDS[(current_time_local.tm_hour % 12) % 10];
-         }
+   if ((current_time->tm_hour >= 6) && (current_time->tm_hour <= 18))
+   {
+      night_mode = false;
+   }
+   else
+   {
+      night_mode = true;
+   }
 
-         if ((current_time_local.tm_hour % 12) < 10)
+   switch (timeslot)
+   {
+      case 1:
+         set_bitmap_image(ctx, &tz1_digits_image[5], resource_id_1, GPoint(114, yloc), night_mode);
+         break;
+
+      case 2:
+         set_bitmap_image(ctx, &tz2_digits_image[5], resource_id_1, GPoint(114, yloc), night_mode);
+         break;
+
+      case 3:
+         set_bitmap_image(ctx, &tz3_digits_image[5], resource_id_1, GPoint(114, yloc), night_mode);
+         break;
+   }
+
+   // display name
+   switch (timeslot)
+   {
+      case 1:
+      {
+         if (switch_seconds != 0)
          {
-            if ((current_time_local.tm_hour >= 6) && (current_time_local.tm_hour <= 18))
+            if (display_is_local)
             {
-               resource_id_1 = RESOURCE_ID_IMAGE_DAY_TIME_BLANK;
+               resource_id_1 = RESOURCE_ID_IMAGE_LOCAL;
             }
             else
             {
-               resource_id_1 = RESOURCE_ID_IMAGE_NIGHT_TIME_BLANK;
+               resource_id_1 = timezones[index].image_id;
             }
          }
-      }
-   }
-
-   set_bitmap_image(&tz1_digits_image[0], tz1_digits_layer[0], resource_id_1, GPoint(0, yloc));
-   set_bitmap_image(&tz1_digits_image[1], tz1_digits_layer[1], resource_id_2, GPoint(26, yloc));
-
-   // display no AM/PM
-   set_bitmap_image(&tz1_digits_image[6], tz1_digits_layer[6], resource_id_3, GPoint(114, yloc + 18));
-
-   // display local colon & minutes
-   if ((current_time_local.tm_hour >= 6) && (current_time_local.tm_hour <= 18))
-   {
-      resource_id_1 = RESOURCE_ID_IMAGE_DAY_TIME_COLON;
-      resource_id_2 = DAY_TIME_IMAGE_RESOURCE_IDS[current_time_local.tm_min / 10];
-      resource_id_3 = DAY_TIME_IMAGE_RESOURCE_IDS[current_time_local.tm_min % 10];
-   }
-   else
-   {
-      resource_id_1 = RESOURCE_ID_IMAGE_NIGHT_TIME_COLON;
-      resource_id_2 = NIGHT_TIME_IMAGE_RESOURCE_IDS[current_time_local.tm_min / 10];
-      resource_id_3 = NIGHT_TIME_IMAGE_RESOURCE_IDS[current_time_local.tm_min % 10];
-   }
-
-   set_bitmap_image(&tz1_digits_image[2], tz1_digits_layer[2], resource_id_1, GPoint(52, yloc));
-   set_bitmap_image(&tz1_digits_image[3], tz1_digits_layer[3], resource_id_2, GPoint(62, yloc));
-   set_bitmap_image(&tz1_digits_image[4], tz1_digits_layer[4], resource_id_3, GPoint(88, yloc));
-}  // display_local()
-
-
-static void display_tz1(void)
-{
-   int yloc = 20;
-   int resource_id_1;
-   int resource_id_2;
-   int resource_id_3;
-
-   current_time1.tm_min += tz1_offset_mins;
-
-   if (current_time1.tm_min >= 60)
-   {
-      current_time1.tm_min %= 60;
-
-      current_time1.tm_hour += 1;
-   }
-   else
-   {
-      if (current_time1.tm_min < 0)
-      {
-         current_time1.tm_min += 60;
-
-         current_time1.tm_hour -= 1;
-      }
-   }
-
-   current_time1.tm_hour += tz1_offset_hours;
-
-   if (current_time1.tm_hour >= 24)
-   {
-      current_time1.tm_hour %= 24;
-
-      if ((current_time1.tm_hour >= 6) && (current_time1.tm_hour <= 18))
-      {
-         // display + offset
-         resource_id_1 = RESOURCE_ID_IMAGE_DAY_TIME_PLUS;
-      }
-      else
-      {
-         // display + offset
-         resource_id_1 = RESOURCE_ID_IMAGE_NIGHT_TIME_PLUS;
-      }
-   }
-   else
-   {
-      if (current_time1.tm_hour < 0)
-      {
-         current_time1.tm_hour += 24;
-
-         if ((current_time1.tm_hour >= 6) && (current_time1.tm_hour <= 18))
+         else
          {
-            // display - offset
-            resource_id_1 = RESOURCE_ID_IMAGE_DAY_TIME_MINUS;
+            resource_id_1 = timezones[index].image_id;
+         }
+
+
+         if ((app_state == APP_SET_LOCAL_STATE) || (app_state == APP_SET_TZ1_STATE))
+         {
+            night_mode = toggle_flag;
          }
          else
          {
-            // display - offset
-            resource_id_1 = RESOURCE_ID_IMAGE_NIGHT_TIME_MINUS;
-         }
-      }
-      else
-      {
-         if ((current_time1.tm_hour >= 6) && (current_time1.tm_hour <= 18))
-         {
-            // display no offset
-            resource_id_1 = RESOURCE_ID_IMAGE_DAY_TIME_NONE;
-         }
-         else
-         {
-            // display no offset
-            resource_id_1 = RESOURCE_ID_IMAGE_NIGHT_TIME_NONE;
-         }
-      }
-   }
-
-   set_bitmap_image(&tz1_digits_image[5], tz1_digits_layer[5], resource_id_1, GPoint(114, yloc));
-
-   // display tz1 name
-   if (app_state == APP_SET_TZ1_STATE)
-   {
-      if (switch_seconds != 0)
-      {
-         if (toggle_flag == false)
-         {
-            resource_id_1 = RESOURCE_ID_IMAGE_DAY_TZ1;
-         }
-         else
-         {
-            resource_id_1 = RESOURCE_ID_IMAGE_NIGHT_TZ1;
-         }
-      }
-      else
-      {
-         if (toggle_flag == false)
-         {
-            resource_id_1 = timezones[tz1_index].day_image_id;
-         }
-         else
-         {
-            resource_id_1 = timezones[tz1_index].night_image_id;
-         }
-      }
-   }
-   else
-   {
-      if (switch_seconds != 0)
-      {
-         if ((current_time1.tm_hour >= 6) && (current_time1.tm_hour <= 18))
-         {
-            resource_id_1 = RESOURCE_ID_IMAGE_DAY_TZ1;
-         }
-         else
-         {
-            resource_id_1 = RESOURCE_ID_IMAGE_NIGHT_TZ1;
-         }
-      }
-      else
-      {
-         if ((current_time1.tm_hour >= 6) && (current_time1.tm_hour <= 18))
-         {
-            resource_id_1 = timezones[tz1_index].day_image_id;
-         }
-         else
-         {
-            resource_id_1 = timezones[tz1_index].night_image_id;
-         }
-      }
-   }
-
-   set_bitmap_image(&tz1_name_image, tz1_name_layer, resource_id_1, GPoint(0, yloc - 20));
-
-   // display time hour
-   if (clock_is_24h_style())
-   {
-      if ((current_time1.tm_hour >= 6) && (current_time1.tm_hour <= 18))
-      {
-         resource_id_1 = DAY_TIME_IMAGE_RESOURCE_IDS[current_time1.tm_hour / 10];
-         resource_id_2 = DAY_TIME_IMAGE_RESOURCE_IDS[current_time1.tm_hour % 10];
-
-         // display no AM/PM
-         resource_id_3 = RESOURCE_ID_IMAGE_DAY_TIME_NONE;
-      }
-      else
-      {
-         resource_id_1 = NIGHT_TIME_IMAGE_RESOURCE_IDS[current_time1.tm_hour / 10];
-         resource_id_2 = NIGHT_TIME_IMAGE_RESOURCE_IDS[current_time1.tm_hour % 10];
-
-         // display no AM/PM
-         resource_id_3 = RESOURCE_ID_IMAGE_NIGHT_TIME_NONE;
-      }
-   }
-   else
-   {
-      // display AM/PM
-      if (current_time1.tm_hour >= 12)
-      {
-         if ((current_time1.tm_hour >= 6) && (current_time1.tm_hour <= 18))
-         {
-            resource_id_3 = RESOURCE_ID_IMAGE_DAY_TIME_PM;
-         }
-         else
-         {
-            resource_id_3 = RESOURCE_ID_IMAGE_NIGHT_TIME_PM;
-         }
-      }
-      else
-      {
-         if ((current_time1.tm_hour >= 6) && (current_time1.tm_hour <= 18))
-         {
-            resource_id_3 = RESOURCE_ID_IMAGE_DAY_TIME_AM;
-         }
-         else
-         {
-            resource_id_3 = RESOURCE_ID_IMAGE_NIGHT_TIME_AM;
-         }
-      }
-
-      if ((current_time1.tm_hour % 12) == 0)
-      {
-         if ((current_time1.tm_hour >= 6) && (current_time1.tm_hour <= 18))
-         {
-            resource_id_1 = DAY_TIME_IMAGE_RESOURCE_IDS[1];
-            resource_id_2 = DAY_TIME_IMAGE_RESOURCE_IDS[2];
-         }
-         else
-         {
-            resource_id_1 = NIGHT_TIME_IMAGE_RESOURCE_IDS[1];
-            resource_id_2 = NIGHT_TIME_IMAGE_RESOURCE_IDS[2];
-         }
-      }
-      else
-      {
-         if ((current_time1.tm_hour >= 6) && (current_time1.tm_hour <= 18))
-         {
-            resource_id_1 = DAY_TIME_IMAGE_RESOURCE_IDS[(current_time1.tm_hour % 12) / 10];
-            resource_id_2 = DAY_TIME_IMAGE_RESOURCE_IDS[(current_time1.tm_hour % 12) % 10];
-         }
-         else
-         {
-            resource_id_1 = NIGHT_TIME_IMAGE_RESOURCE_IDS[(current_time1.tm_hour % 12) / 10];
-            resource_id_2 = NIGHT_TIME_IMAGE_RESOURCE_IDS[(current_time1.tm_hour % 12) % 10];
-         }
-
-         if ((current_time1.tm_hour % 12) < 10)
-         {
-            if ((current_time1.tm_hour >= 6) && (current_time1.tm_hour <= 18))
+            if ((current_time->tm_hour >= 6) && (current_time->tm_hour <= 18))
             {
-               resource_id_1 = RESOURCE_ID_IMAGE_DAY_TIME_BLANK;
+               night_mode = false;
             }
             else
             {
-               resource_id_1 = RESOURCE_ID_IMAGE_NIGHT_TIME_BLANK;
+               night_mode = true;
             }
          }
       }
-   }
+      break;
 
-   set_bitmap_image(&tz1_digits_image[0], tz1_digits_layer[0], resource_id_1, GPoint(0, yloc));
-   set_bitmap_image(&tz1_digits_image[1], tz1_digits_layer[1], resource_id_2, GPoint(26, yloc));
-
-   // display no AM/PM
-   set_bitmap_image(&tz1_digits_image[6], tz1_digits_layer[6], resource_id_3, GPoint(114, yloc + 18));
-
-   // display tz1 colon & minutes
-   if ((current_time1.tm_hour >= 6) && (current_time1.tm_hour <= 18))
-   {
-      set_bitmap_image(&tz1_digits_image[2], tz1_digits_layer[2], RESOURCE_ID_IMAGE_DAY_TIME_COLON, GPoint(52, yloc));
-      set_bitmap_image(&tz1_digits_image[3], tz1_digits_layer[3], DAY_TIME_IMAGE_RESOURCE_IDS[current_time1.tm_min / 10], GPoint(62, yloc));
-      set_bitmap_image(&tz1_digits_image[4], tz1_digits_layer[4], DAY_TIME_IMAGE_RESOURCE_IDS[current_time1.tm_min % 10], GPoint(88, yloc));
-   }
-   else
-   {
-      set_bitmap_image(&tz1_digits_image[2], tz1_digits_layer[2], RESOURCE_ID_IMAGE_NIGHT_TIME_COLON, GPoint(52, yloc));
-      set_bitmap_image(&tz1_digits_image[3], tz1_digits_layer[3], NIGHT_TIME_IMAGE_RESOURCE_IDS[current_time1.tm_min / 10], GPoint(62, yloc));
-      set_bitmap_image(&tz1_digits_image[4], tz1_digits_layer[4], NIGHT_TIME_IMAGE_RESOURCE_IDS[current_time1.tm_min % 10], GPoint(88, yloc));
-   }
-}  // display_tz1()
-
-
-static void display_tz2(void)
-{
-   int yloc = 76;
-
-   current_time2.tm_min += tz2_offset_mins;
-
-   if (current_time2.tm_min >= 60)
-   {
-      current_time2.tm_min %= 60;
-
-      current_time2.tm_hour += 1;
-   }
-   else
-   {
-      if (current_time2.tm_min < 0)
+      case 2:
       {
-         current_time2.tm_min += 60;
+         resource_id_1 = timezones[index].image_id;
 
-         current_time2.tm_hour -= 1;
-      }
-   }
-
-   current_time2.tm_hour += tz2_offset_hours;
-
-   if (current_time2.tm_hour >= 24)
-   {
-      current_time2.tm_hour %= 24;
-
-      if ((current_time2.tm_hour >= 6) && (current_time2.tm_hour <= 18))
-      {
-         // display + offset
-         set_bitmap_image(&tz2_digits_image[5], tz2_digits_layer[5], RESOURCE_ID_IMAGE_DAY_TIME_PLUS, GPoint(114, yloc));
-      }
-      else
-      {
-         // display + offset
-         set_bitmap_image(&tz2_digits_image[5], tz2_digits_layer[5], RESOURCE_ID_IMAGE_NIGHT_TIME_PLUS, GPoint(114, yloc));
-      }
-   }
-   else
-   {
-      if (current_time2.tm_hour < 0)
-      {
-         current_time2.tm_hour += 24;
-
-         if ((current_time2.tm_hour >= 6) && (current_time2.tm_hour <= 18))
+         if (app_state == APP_SET_TZ2_STATE)
          {
-            // display - offset
-            set_bitmap_image(&tz2_digits_image[5], tz2_digits_layer[5], RESOURCE_ID_IMAGE_DAY_TIME_MINUS, GPoint(114, yloc));
+            night_mode = toggle_flag;
          }
          else
          {
-            // display - offset
-            set_bitmap_image(&tz2_digits_image[5], tz2_digits_layer[5], RESOURCE_ID_IMAGE_NIGHT_TIME_MINUS, GPoint(114, yloc));
+            if ((current_time->tm_hour >= 6) && (current_time->tm_hour <= 18))
+            {
+               night_mode = false;
+            }
+            else
+            {
+               night_mode = true;
+            }
          }
       }
-      else
+      break;
+
+      case 3:
       {
-         if ((current_time2.tm_hour >= 6) && (current_time2.tm_hour <= 18))
+         resource_id_1 = timezones[index].image_id;
+
+         if (app_state == APP_SET_TZ3_STATE)
          {
-            // display no offset
-            set_bitmap_image(&tz2_digits_image[5], tz2_digits_layer[5], RESOURCE_ID_IMAGE_DAY_TIME_NONE, GPoint(114, yloc));
+            night_mode = toggle_flag;
          }
          else
          {
-            // display no offset
-            set_bitmap_image(&tz2_digits_image[5], tz2_digits_layer[5], RESOURCE_ID_IMAGE_NIGHT_TIME_NONE, GPoint(114, yloc));
+            if ((current_time->tm_hour >= 6) && (current_time->tm_hour <= 18))
+            {
+               night_mode = false;
+            }
+            else
+            {
+               night_mode = true;
+            }
          }
       }
+      break;
    }
 
-   // display tz2 name
-   if (app_state == APP_SET_TZ2_STATE)
+   switch (timeslot)
    {
-      if (toggle_flag == false)
-      {
-         set_bitmap_image(&tz2_name_image, tz2_name_layer, timezones[tz2_index].day_image_id, GPoint(0, yloc - 20));
-      }
-      else
-      {
-         set_bitmap_image(&tz2_name_image, tz2_name_layer, timezones[tz2_index].night_image_id, GPoint(0, yloc - 20));
-      }
-   }
-   else
-   {
-      if ((current_time2.tm_hour >= 6) && (current_time2.tm_hour <= 18))
-      {
-         set_bitmap_image(&tz2_name_image, tz2_name_layer, timezones[tz2_index].day_image_id, GPoint(0, yloc - 20));
-      }
-      else
-      {
-         set_bitmap_image(&tz2_name_image, tz2_name_layer, timezones[tz2_index].night_image_id, GPoint(0, yloc - 20));
-      }
+      case 1:
+         set_bitmap_image(ctx, &tz1_name_image, resource_id_1, GPoint(0, yloc - 20), night_mode);
+         break;
+
+      case 2:
+         set_bitmap_image(ctx, &tz2_name_image, resource_id_1, GPoint(0, yloc - 20), night_mode);
+         break;
+
+      case 3:
+         set_bitmap_image(ctx, &tz3_name_image, resource_id_1, GPoint(0, yloc - 20), night_mode);
+         break;
    }
 
    // display time hour
    if (clock_is_24h_style())
    {
-      if ((current_time2.tm_hour >= 6) && (current_time2.tm_hour <= 18))
-      {
-         set_bitmap_image(&tz2_digits_image[0], tz2_digits_layer[0], DAY_TIME_IMAGE_RESOURCE_IDS[current_time2.tm_hour / 10], GPoint(0, yloc));
-         set_bitmap_image(&tz2_digits_image[1], tz2_digits_layer[1], DAY_TIME_IMAGE_RESOURCE_IDS[current_time2.tm_hour % 10], GPoint(26, yloc));
+      resource_id_1 = TIME_IMAGE_RESOURCE_IDS[current_time->tm_hour / 10];
+      resource_id_2 = TIME_IMAGE_RESOURCE_IDS[current_time->tm_hour % 10];
 
-         // display no AM/PM
-         set_bitmap_image(&tz2_digits_image[6], tz2_digits_layer[6], RESOURCE_ID_IMAGE_DAY_TIME_NONE, GPoint(114, yloc + 18));
-      }
-      else
-      {
-         set_bitmap_image(&tz2_digits_image[0], tz2_digits_layer[0], NIGHT_TIME_IMAGE_RESOURCE_IDS[current_time2.tm_hour / 10], GPoint(0, yloc));
-         set_bitmap_image(&tz2_digits_image[1], tz2_digits_layer[1], NIGHT_TIME_IMAGE_RESOURCE_IDS[current_time2.tm_hour % 10], GPoint(26, yloc));
-
-         // display no AM/PM
-         set_bitmap_image(&tz2_digits_image[6], tz2_digits_layer[6], RESOURCE_ID_IMAGE_NIGHT_TIME_NONE, GPoint(114, yloc + 18));
-      }
+      // display no AM/PM
+      resource_id_3 = RESOURCE_ID_IMAGE_TIME_NONE;
    }
    else
    {
       // display AM/PM
-      if (current_time2.tm_hour >= 12)
+      if (current_time->tm_hour >= 12)
       {
-         if (current_time2.tm_hour <= 18)
-         {
-            set_bitmap_image(&tz2_digits_image[6], tz2_digits_layer[6], RESOURCE_ID_IMAGE_DAY_TIME_PM, GPoint(114, yloc + 18));
-         }
-         else
-         {
-            set_bitmap_image(&tz2_digits_image[6], tz2_digits_layer[6], RESOURCE_ID_IMAGE_NIGHT_TIME_PM, GPoint(114, yloc + 18));
-         }
+         resource_id_3 = RESOURCE_ID_IMAGE_TIME_PM;
       }
       else
       {
-         if (current_time2.tm_hour >= 6)
-         {
-            set_bitmap_image(&tz2_digits_image[6], tz2_digits_layer[6], RESOURCE_ID_IMAGE_DAY_TIME_AM, GPoint(114, yloc + 18));
-         }
-         else
-         {
-            set_bitmap_image(&tz2_digits_image[6], tz2_digits_layer[6], RESOURCE_ID_IMAGE_NIGHT_TIME_AM, GPoint(114, yloc + 18));
-         }
+         resource_id_3 = RESOURCE_ID_IMAGE_TIME_AM;
       }
 
-      if ((current_time2.tm_hour % 12) == 0)
+      if ((current_time->tm_hour % 12) == 0)
       {
-         if ((current_time2.tm_hour >= 6) && (current_time2.tm_hour <= 18))
-         {
-            set_bitmap_image(&tz2_digits_image[0], tz2_digits_layer[0], DAY_TIME_IMAGE_RESOURCE_IDS[1], GPoint(0, yloc));
-            set_bitmap_image(&tz2_digits_image[1], tz2_digits_layer[1], DAY_TIME_IMAGE_RESOURCE_IDS[2], GPoint(26, yloc));
-         }
-         else
-         {
-            set_bitmap_image(&tz2_digits_image[0], tz2_digits_layer[0], NIGHT_TIME_IMAGE_RESOURCE_IDS[1], GPoint(0, yloc));
-            set_bitmap_image(&tz2_digits_image[1], tz2_digits_layer[1], NIGHT_TIME_IMAGE_RESOURCE_IDS[2], GPoint(26, yloc));
-         }
+         resource_id_1 = TIME_IMAGE_RESOURCE_IDS[1];
+         resource_id_2 = TIME_IMAGE_RESOURCE_IDS[2];
       }
       else
       {
-         if ((current_time2.tm_hour >= 6) && (current_time2.tm_hour <= 18))
-         {
-            set_bitmap_image(&tz2_digits_image[0], tz2_digits_layer[0], DAY_TIME_IMAGE_RESOURCE_IDS[(current_time2.tm_hour % 12) / 10], GPoint(0, yloc));
-            set_bitmap_image(&tz2_digits_image[1], tz2_digits_layer[1], DAY_TIME_IMAGE_RESOURCE_IDS[(current_time2.tm_hour % 12) % 10], GPoint(26, yloc));
-         }
-         else
-         {
-            set_bitmap_image(&tz2_digits_image[0], tz2_digits_layer[0], NIGHT_TIME_IMAGE_RESOURCE_IDS[(current_time2.tm_hour % 12) / 10], GPoint(0, yloc));
-            set_bitmap_image(&tz2_digits_image[1], tz2_digits_layer[1], NIGHT_TIME_IMAGE_RESOURCE_IDS[(current_time2.tm_hour % 12) % 10], GPoint(26, yloc));
-         }
+         resource_id_1 = TIME_IMAGE_RESOURCE_IDS[(current_time->tm_hour % 12) / 10];
+         resource_id_2 = TIME_IMAGE_RESOURCE_IDS[(current_time->tm_hour % 12) % 10];
 
-         if ((current_time2.tm_hour % 12) < 10)
+         if ((current_time->tm_hour % 12) < 10)
          {
-            if ((current_time2.tm_hour >= 6) && (current_time2.tm_hour <= 18))
-            {
-               set_bitmap_image(&tz2_digits_image[0], tz2_digits_layer[0], RESOURCE_ID_IMAGE_DAY_TIME_BLANK, GPoint(0, yloc));
-            }
-            else
-            {
-               set_bitmap_image(&tz2_digits_image[0], tz2_digits_layer[0], RESOURCE_ID_IMAGE_NIGHT_TIME_BLANK, GPoint(0, yloc));
-            }
+            resource_id_1 = RESOURCE_ID_IMAGE_TIME_BLANK;
          }
       }
    }
 
-   // display tz2 colon & minutes
-   if ((current_time2.tm_hour >= 6) && (current_time2.tm_hour <= 18))
+   if ((current_time->tm_hour >= 6) && (current_time->tm_hour <= 18))
    {
-      set_bitmap_image(&tz2_digits_image[2], tz2_digits_layer[2], RESOURCE_ID_IMAGE_DAY_TIME_COLON, GPoint(52, yloc));
-      set_bitmap_image(&tz2_digits_image[3], tz2_digits_layer[3], DAY_TIME_IMAGE_RESOURCE_IDS[current_time2.tm_min / 10], GPoint(62, yloc));
-      set_bitmap_image(&tz2_digits_image[4], tz2_digits_layer[4], DAY_TIME_IMAGE_RESOURCE_IDS[current_time2.tm_min % 10], GPoint(88, yloc));
+      night_mode = false;
    }
    else
    {
-      set_bitmap_image(&tz2_digits_image[2], tz2_digits_layer[2], RESOURCE_ID_IMAGE_NIGHT_TIME_COLON, GPoint(52, yloc));
-      set_bitmap_image(&tz2_digits_image[3], tz2_digits_layer[3], NIGHT_TIME_IMAGE_RESOURCE_IDS[current_time2.tm_min / 10], GPoint(62, yloc));
-      set_bitmap_image(&tz2_digits_image[4], tz2_digits_layer[4], NIGHT_TIME_IMAGE_RESOURCE_IDS[current_time2.tm_min % 10], GPoint(88, yloc));
+      night_mode = true;
    }
-}  // display_tz2()
 
-
-static void display_tz3(void)
-{
-   int yloc = 132;
-
-   current_time3.tm_min += tz3_offset_mins;
-
-   if (current_time3.tm_min >= 60)
+   switch (timeslot)
    {
-      current_time3.tm_min %= 60;
+      case 1:
+      {
+         set_bitmap_image(ctx, &tz1_digits_image[0], resource_id_1, GPoint(0, yloc), night_mode);
+         set_bitmap_image(ctx, &tz1_digits_image[1], resource_id_2, GPoint(26, yloc), night_mode);
 
-      current_time3.tm_hour += 1;
+         // display AM/PM
+         set_bitmap_image(ctx, &tz1_digits_image[6], resource_id_3, GPoint(114, yloc + 18), night_mode);
+
+         // display local colon & minutes
+         resource_id_1 = RESOURCE_ID_IMAGE_TIME_COLON;
+         resource_id_2 = TIME_IMAGE_RESOURCE_IDS[current_time->tm_min / 10];
+         resource_id_3 = TIME_IMAGE_RESOURCE_IDS[current_time->tm_min % 10];
+
+         set_bitmap_image(ctx, &tz1_digits_image[2], resource_id_1, GPoint(52, yloc), night_mode);
+         set_bitmap_image(ctx, &tz1_digits_image[3], resource_id_2, GPoint(62, yloc), night_mode);
+         set_bitmap_image(ctx, &tz1_digits_image[4], resource_id_3, GPoint(88, yloc), night_mode);
+      }
+      break;
+
+      case 2:
+      {
+         set_bitmap_image(ctx, &tz2_digits_image[0], resource_id_1, GPoint(0, yloc), night_mode);
+         set_bitmap_image(ctx, &tz2_digits_image[1], resource_id_2, GPoint(26, yloc), night_mode);
+
+         // display AM/PM
+         set_bitmap_image(ctx, &tz2_digits_image[6], resource_id_3, GPoint(114, yloc + 18), night_mode);
+
+         // display local colon & minutes
+         resource_id_1 = RESOURCE_ID_IMAGE_TIME_COLON;
+         resource_id_2 = TIME_IMAGE_RESOURCE_IDS[current_time->tm_min / 10];
+         resource_id_3 = TIME_IMAGE_RESOURCE_IDS[current_time->tm_min % 10];
+
+         set_bitmap_image(ctx, &tz2_digits_image[2], resource_id_1, GPoint(52, yloc), night_mode);
+         set_bitmap_image(ctx, &tz2_digits_image[3], resource_id_2, GPoint(62, yloc), night_mode);
+         set_bitmap_image(ctx, &tz2_digits_image[4], resource_id_3, GPoint(88, yloc), night_mode);
+      }
+      break;
+
+      case 3:
+      {
+         set_bitmap_image(ctx, &tz3_digits_image[0], resource_id_1, GPoint(0, yloc), night_mode);
+         set_bitmap_image(ctx, &tz3_digits_image[1], resource_id_2, GPoint(26, yloc), night_mode);
+
+         // display AM/PM
+         set_bitmap_image(ctx, &tz3_digits_image[6], resource_id_3, GPoint(114, yloc + 18), night_mode);
+
+         // display local colon & minutes
+         resource_id_1 = RESOURCE_ID_IMAGE_TIME_COLON;
+         resource_id_2 = TIME_IMAGE_RESOURCE_IDS[current_time->tm_min / 10];
+         resource_id_3 = TIME_IMAGE_RESOURCE_IDS[current_time->tm_min % 10];
+
+         set_bitmap_image(ctx, &tz3_digits_image[2], resource_id_1, GPoint(52, yloc), night_mode);
+         set_bitmap_image(ctx, &tz3_digits_image[3], resource_id_2, GPoint(62, yloc), night_mode);
+         set_bitmap_image(ctx, &tz3_digits_image[4], resource_id_3, GPoint(88, yloc), night_mode);
+      }
+      break;
    }
-   else
-   {
-      if (current_time3.tm_min < 0)
-      {
-         current_time3.tm_min += 60;
-
-         current_time3.tm_hour -= 1;
-      }
-   }
-
-   current_time3.tm_hour += tz3_offset_hours;
-
-   if (current_time3.tm_hour >= 24)
-   {
-      current_time3.tm_hour %= 24;
-
-      if ((current_time3.tm_hour >= 6) && (current_time3.tm_hour <= 18))
-      {
-         // display + offset
-         set_bitmap_image(&tz3_digits_image[5], tz3_digits_layer[5], RESOURCE_ID_IMAGE_DAY_TIME_PLUS, GPoint(114, yloc));
-      }
-      else
-      {
-         // display + offset
-         set_bitmap_image(&tz3_digits_image[5], tz3_digits_layer[5], RESOURCE_ID_IMAGE_NIGHT_TIME_PLUS, GPoint(114, yloc));
-      }
-   }
-   else
-   {
-      if (current_time3.tm_hour < 0)
-      {
-         current_time3.tm_hour += 24;
-
-         if ((current_time3.tm_hour >= 6) && (current_time3.tm_hour <= 18))
-         {
-            // display - offset
-            set_bitmap_image(&tz3_digits_image[5], tz3_digits_layer[5], RESOURCE_ID_IMAGE_DAY_TIME_MINUS, GPoint(114, yloc));
-         }
-         else
-         {
-            // display - offset
-            set_bitmap_image(&tz3_digits_image[5], tz3_digits_layer[5], RESOURCE_ID_IMAGE_NIGHT_TIME_MINUS, GPoint(114, yloc));
-         }
-      }
-      else
-      {
-         if ((current_time3.tm_hour >= 6) && (current_time3.tm_hour <= 18))
-         {
-            // display no offset
-            set_bitmap_image(&tz3_digits_image[5], tz3_digits_layer[5], RESOURCE_ID_IMAGE_DAY_TIME_NONE, GPoint(114, yloc));
-         }
-         else
-         {
-            // display no offset
-            set_bitmap_image(&tz3_digits_image[5], tz3_digits_layer[5], RESOURCE_ID_IMAGE_NIGHT_TIME_NONE, GPoint(114, yloc));
-         }
-      }
-   }
-
-   // display tz3 name
-   if (app_state == APP_SET_TZ3_STATE)
-   {
-      if (toggle_flag == false)
-      {
-         set_bitmap_image(&tz3_name_image, tz3_name_layer, timezones[tz3_index].day_image_id, GPoint(0, yloc - 20));
-      }
-      else
-      {
-         set_bitmap_image(&tz3_name_image, tz3_name_layer, timezones[tz3_index].night_image_id, GPoint(0, yloc - 20));
-      }
-   }
-   else
-   {
-      if ((current_time3.tm_hour >= 6) && (current_time3.tm_hour <= 18))
-      {
-         set_bitmap_image(&tz3_name_image, tz3_name_layer, timezones[tz3_index].day_image_id, GPoint(0, yloc - 20));
-      }
-      else
-      {
-         set_bitmap_image(&tz3_name_image, tz3_name_layer, timezones[tz3_index].night_image_id, GPoint(0, yloc - 20));
-      }
-   }
-
-   // display time hour
-   if (clock_is_24h_style())
-   {
-      if ((current_time3.tm_hour >= 6) && (current_time3.tm_hour <= 18))
-      {
-         set_bitmap_image(&tz3_digits_image[0], tz3_digits_layer[0], DAY_TIME_IMAGE_RESOURCE_IDS[current_time3.tm_hour / 10], GPoint(0, yloc));
-         set_bitmap_image(&tz3_digits_image[1], tz3_digits_layer[1], DAY_TIME_IMAGE_RESOURCE_IDS[current_time3.tm_hour % 10], GPoint(26, yloc));
-
-         // display no AM/PM
-         set_bitmap_image(&tz3_digits_image[6], tz3_digits_layer[6], RESOURCE_ID_IMAGE_DAY_TIME_NONE, GPoint(114, yloc + 18));
-      }
-      else
-      {
-         set_bitmap_image(&tz3_digits_image[0], tz3_digits_layer[0], NIGHT_TIME_IMAGE_RESOURCE_IDS[current_time3.tm_hour / 10], GPoint(0, yloc));
-         set_bitmap_image(&tz3_digits_image[1], tz3_digits_layer[1], NIGHT_TIME_IMAGE_RESOURCE_IDS[current_time3.tm_hour % 10], GPoint(26, yloc));
-
-         // display no AM/PM
-         set_bitmap_image(&tz3_digits_image[6], tz3_digits_layer[6], RESOURCE_ID_IMAGE_NIGHT_TIME_NONE, GPoint(114, yloc + 18));
-      }
-   }
-   else
-   {
-      // display AM/PM
-      if (current_time3.tm_hour >= 12)
-      {
-         if (current_time3.tm_hour <= 18)
-         {
-            set_bitmap_image(&tz3_digits_image[6], tz3_digits_layer[6], RESOURCE_ID_IMAGE_DAY_TIME_PM, GPoint(114, yloc + 18));
-         }
-         else
-         {
-            set_bitmap_image(&tz3_digits_image[6], tz3_digits_layer[6], RESOURCE_ID_IMAGE_NIGHT_TIME_PM, GPoint(114, yloc + 18));
-         }
-      }
-      else
-      {
-         if (current_time3.tm_hour >= 6)
-         {
-            set_bitmap_image(&tz3_digits_image[6], tz3_digits_layer[6], RESOURCE_ID_IMAGE_DAY_TIME_AM, GPoint(114, yloc + 18));
-         }
-         else
-         {
-            set_bitmap_image(&tz3_digits_image[6], tz3_digits_layer[6], RESOURCE_ID_IMAGE_NIGHT_TIME_AM, GPoint(114, yloc + 18));
-         }
-      }
-
-      if ((current_time3.tm_hour % 12) == 0)
-      {
-         if ((current_time3.tm_hour >= 6) && (current_time3.tm_hour <= 18))
-         {
-            set_bitmap_image(&tz3_digits_image[0], tz3_digits_layer[0], DAY_TIME_IMAGE_RESOURCE_IDS[1], GPoint(0, yloc));
-            set_bitmap_image(&tz3_digits_image[1], tz3_digits_layer[1], DAY_TIME_IMAGE_RESOURCE_IDS[2], GPoint(26, yloc));
-         }
-         else
-         {
-            set_bitmap_image(&tz3_digits_image[0], tz3_digits_layer[0], NIGHT_TIME_IMAGE_RESOURCE_IDS[1], GPoint(0, yloc));
-            set_bitmap_image(&tz3_digits_image[1], tz3_digits_layer[1], NIGHT_TIME_IMAGE_RESOURCE_IDS[2], GPoint(26, yloc));
-         }
-      }
-      else
-      {
-         if ((current_time3.tm_hour >= 6) && (current_time3.tm_hour <= 18))
-         {
-            set_bitmap_image(&tz3_digits_image[0], tz3_digits_layer[0], DAY_TIME_IMAGE_RESOURCE_IDS[(current_time3.tm_hour % 12) / 10], GPoint(0, yloc));
-            set_bitmap_image(&tz3_digits_image[1], tz3_digits_layer[1], DAY_TIME_IMAGE_RESOURCE_IDS[(current_time3.tm_hour % 12) % 10], GPoint(26, yloc));
-         }
-         else
-         {
-            set_bitmap_image(&tz3_digits_image[0], tz3_digits_layer[0], NIGHT_TIME_IMAGE_RESOURCE_IDS[(current_time3.tm_hour % 12) / 10], GPoint(0, yloc));
-            set_bitmap_image(&tz3_digits_image[1], tz3_digits_layer[1], NIGHT_TIME_IMAGE_RESOURCE_IDS[(current_time3.tm_hour % 12) % 10], GPoint(26, yloc));
-         }
-
-         if ((current_time3.tm_hour % 12) < 10)
-         {
-            if ((current_time3.tm_hour >= 6) && (current_time3.tm_hour <= 18))
-            {
-               set_bitmap_image(&tz3_digits_image[0], tz3_digits_layer[0], RESOURCE_ID_IMAGE_DAY_TIME_BLANK, GPoint(0, yloc));
-            }
-            else
-            {
-               set_bitmap_image(&tz3_digits_image[0], tz3_digits_layer[0], RESOURCE_ID_IMAGE_NIGHT_TIME_BLANK, GPoint(0, yloc));
-            }
-         }
-      }
-   }
-
-   // display tz3 colon & minutes
-   if ((current_time3.tm_hour >= 6) && (current_time3.tm_hour <= 18))
-   {
-      set_bitmap_image(&tz3_digits_image[2], tz3_digits_layer[2], RESOURCE_ID_IMAGE_DAY_TIME_COLON, GPoint(52, yloc));
-      set_bitmap_image(&tz3_digits_image[3], tz3_digits_layer[3], DAY_TIME_IMAGE_RESOURCE_IDS[current_time3.tm_min / 10], GPoint(62, yloc));
-      set_bitmap_image(&tz3_digits_image[4], tz3_digits_layer[4], DAY_TIME_IMAGE_RESOURCE_IDS[current_time3.tm_min % 10], GPoint(88, yloc));
-   }
-   else
-   {
-      set_bitmap_image(&tz3_digits_image[2], tz3_digits_layer[2], RESOURCE_ID_IMAGE_NIGHT_TIME_COLON, GPoint(52, yloc));
-      set_bitmap_image(&tz3_digits_image[3], tz3_digits_layer[3], NIGHT_TIME_IMAGE_RESOURCE_IDS[current_time3.tm_min / 10], GPoint(62, yloc));
-      set_bitmap_image(&tz3_digits_image[4], tz3_digits_layer[4], NIGHT_TIME_IMAGE_RESOURCE_IDS[current_time3.tm_min % 10], GPoint(88, yloc));
-   }
-}  // display_tz3()
+}  // display_time()
 
 
 static void down_single_click_handler(ClickRecognizerRef recognizer, void *context)
@@ -1172,9 +576,6 @@ static void down_single_click_handler(ClickRecognizerRef recognizer, void *conte
 
             // save local_index into persistent storage
             persist_write_int(PKEY_LOCAL_INDEX, local_index);
-
-            local_offset_hours = timezones[local_index].offset_hours;
-            local_offset_mins = timezones[local_index].offset_mins;
          }
 
          setmode_timer = SETMODE_SECONDS;
@@ -1187,9 +588,6 @@ static void down_single_click_handler(ClickRecognizerRef recognizer, void *conte
 
             // save tz1_index into persistent storage
             persist_write_int(PKEY_TZ1_INDEX, tz1_index);
-
-            tz1_offset_hours = timezones[tz1_index].offset_hours;
-            tz1_offset_mins = timezones[tz1_index].offset_mins;
          }
 
          setmode_timer = SETMODE_SECONDS;
@@ -1202,9 +600,6 @@ static void down_single_click_handler(ClickRecognizerRef recognizer, void *conte
 
             // save tz2_index into persistent storage
             persist_write_int(PKEY_TZ2_INDEX, tz2_index);
-
-            tz2_offset_hours = timezones[tz2_index].offset_hours;
-            tz2_offset_mins = timezones[tz2_index].offset_mins;
          }
 
          setmode_timer = SETMODE_SECONDS;
@@ -1217,9 +612,6 @@ static void down_single_click_handler(ClickRecognizerRef recognizer, void *conte
 
             // save tz3_index into persistent storage
             persist_write_int(PKEY_TZ3_INDEX, tz3_index);
-
-            tz3_offset_hours = timezones[tz3_index].offset_hours;
-            tz3_offset_mins = timezones[tz3_index].offset_mins;
          }
 
          setmode_timer = SETMODE_SECONDS;
@@ -1233,6 +625,8 @@ static void down_single_click_handler(ClickRecognizerRef recognizer, void *conte
 
 static void handle_accel_tap(AccelAxisType axis, int32_t direction)
 {
+   splash_timer = 0;
+
    light_on = !light_on;
 
    if (light_on)
@@ -1250,17 +644,9 @@ static void handle_accel_tap(AccelAxisType axis, int32_t direction)
 
 void handle_second_tick(struct tm *tick_time, TimeUnits units_changed)
 {
-   time_t t = time(NULL);
-   struct tm *current_time = localtime(&t);
-
    if (splash_timer > 0)
    {
       splash_timer--;
-
-      if (splash_timer == 0)
-      {
-         set_bitmap_image(&splash_image, splash_layer, RESOURCE_ID_IMAGE_WHITE_BACK, GPoint (0, 0));
-      }
    }
    else
    {
@@ -1294,15 +680,12 @@ void handle_second_tick(struct tm *tick_time, TimeUnits units_changed)
       }
    }
 
-   update_display(current_time);
+   layer_mark_dirty(window_layer);
 }  // handle_second_tick()
 
 
 static void init(void)
 {
-   time_t t = time(NULL);
-   struct tm *current_time = localtime(&t);
-
    GRect dummy_frame = { {0, 0}, {0, 0} };
 
    window = window_create();
@@ -1322,62 +705,26 @@ static void init(void)
 
    window_set_fullscreen(window, true);
    window_stack_push(window, true /* Animated */);
-   Layer *window_layer = window_get_root_layer(window);
+   window_layer = window_get_root_layer(window);
 
    window_set_click_config_provider(window, click_config_provider);
+   layer_set_update_proc(window_layer, update_display);
 
-   if ((current_time->tm_hour >= 6) && (current_time->tm_hour <= 18))
-   {
-      splash_image = gbitmap_create_with_resource(RESOURCE_ID_IMAGE_SPLASH);
-   }
-   else
-   {
-      splash_image = gbitmap_create_with_resource(RESOURCE_ID_IMAGE_INV_SPLASH);
-   }
+   splash_image = gbitmap_create_with_resource(RESOURCE_ID_IMAGE_SPLASH);
    splash_layer = bitmap_layer_create(dummy_frame);
+   bitmap_layer_set_background_color(splash_layer, GColorClear);
    bitmap_layer_set_bitmap(splash_layer, splash_image);
    layer_add_child(window_layer, bitmap_layer_get_layer(splash_layer));
  
-   tz1_name_image = gbitmap_create_with_resource(RESOURCE_ID_IMAGE_DAY_UTC); 
-   tz1_name_layer = bitmap_layer_create(dummy_frame);
-   bitmap_layer_set_bitmap(tz1_name_layer, tz1_name_image);
-   layer_add_child(window_layer, bitmap_layer_get_layer(tz1_name_layer));
-
-   tz2_name_image = gbitmap_create_with_resource(RESOURCE_ID_IMAGE_DAY_UTC); 
-   tz2_name_layer = bitmap_layer_create(dummy_frame);
-   bitmap_layer_set_bitmap(tz2_name_layer, tz2_name_image);
-   layer_add_child(window_layer, bitmap_layer_get_layer(tz2_name_layer));
-
-   tz3_name_image = gbitmap_create_with_resource(RESOURCE_ID_IMAGE_DAY_UTC); 
-   tz3_name_layer = bitmap_layer_create(dummy_frame);
-   bitmap_layer_set_bitmap(tz3_name_layer, tz3_name_image);
-   layer_add_child(window_layer, bitmap_layer_get_layer(tz3_name_layer));
+   tz1_name_image = gbitmap_create_with_resource(RESOURCE_ID_IMAGE_UTC); 
+   tz2_name_image = gbitmap_create_with_resource(RESOURCE_ID_IMAGE_UTC); 
+   tz3_name_image = gbitmap_create_with_resource(RESOURCE_ID_IMAGE_UTC); 
 
    for (int i = 0; i < TOTAL_IMAGES; i++)
    {
-      tz1_digits_image[i] = gbitmap_create_with_resource(RESOURCE_ID_IMAGE_DAY_TIME_0); 
-      tz1_digits_layer[i] = bitmap_layer_create(dummy_frame);
-      bitmap_layer_set_bitmap(tz1_digits_layer[i], tz1_digits_image[i]);
-      layer_add_child(window_layer, bitmap_layer_get_layer(tz1_digits_layer[i]));
-
-      tz2_digits_image[i] = gbitmap_create_with_resource(RESOURCE_ID_IMAGE_DAY_TIME_0); 
-      tz2_digits_layer[i] = bitmap_layer_create(dummy_frame);
-      bitmap_layer_set_bitmap(tz2_digits_layer[i], tz2_digits_image[i]);
-      layer_add_child(window_layer, bitmap_layer_get_layer(tz2_digits_layer[i]));
-
-      tz3_digits_image[i] = gbitmap_create_with_resource(RESOURCE_ID_IMAGE_DAY_TIME_0); 
-      tz3_digits_layer[i] = bitmap_layer_create(dummy_frame);
-      bitmap_layer_set_bitmap(tz3_digits_layer[i], tz3_digits_image[i]);
-      layer_add_child(window_layer, bitmap_layer_get_layer(tz3_digits_layer[i]));
-   }
-
-   if ((current_time->tm_hour >= 6) && (current_time->tm_hour <= 18))
-   {
-      set_bitmap_image(&splash_image, splash_layer, RESOURCE_ID_IMAGE_SPLASH, GPoint (0, 0));
-   }
-   else
-   {
-      set_bitmap_image(&splash_image, splash_layer, RESOURCE_ID_IMAGE_INV_SPLASH, GPoint (0, 0));
+      tz1_digits_image[i] = gbitmap_create_with_resource(RESOURCE_ID_IMAGE_TIME_0); 
+      tz2_digits_image[i] = gbitmap_create_with_resource(RESOURCE_ID_IMAGE_TIME_0); 
+      tz3_digits_image[i] = gbitmap_create_with_resource(RESOURCE_ID_IMAGE_TIME_0); 
    }
 
    accel_tap_service_subscribe(&handle_accel_tap);
@@ -1385,20 +732,8 @@ static void init(void)
 
    app_state = APP_IDLE_STATE;
 
-   local_offset_hours = timezones[local_index].offset_hours;
-   local_offset_mins = timezones[local_index].offset_mins;
-
-   tz1_offset_hours = timezones [tz1_index].offset_hours;
-   tz1_offset_mins = timezones [tz1_index].offset_mins;
-
-   tz2_offset_hours = timezones [tz2_index].offset_hours;
-   tz2_offset_mins = timezones [tz2_index].offset_mins;
-
-   tz3_offset_hours = timezones [tz3_index].offset_hours;
-   tz3_offset_mins = timezones [tz3_index].offset_mins;
-
    // kick initial display
-   update_display(current_time);
+   layer_mark_dirty(window_layer);
 }  // init()
 
 
@@ -1465,6 +800,8 @@ static void select_single_click_handler(ClickRecognizerRef recognizer, void *con
    {
       if (light_timer == 4)
       {
+         splash_timer = 0;
+
          switch_seconds = SWITCH_SECONDS;
 
          display_is_local = !display_is_local;
@@ -1477,6 +814,8 @@ static void select_single_click_handler(ClickRecognizerRef recognizer, void *con
       }
       else
       {
+         splash_timer = 0;
+
          light_timer = 4;
 
          light_on = !light_on;
@@ -1494,19 +833,30 @@ static void select_single_click_handler(ClickRecognizerRef recognizer, void *con
 }  // select_single_click_handler()
 
 
-static void set_bitmap_image(GBitmap **bmp_image, BitmapLayer *bmp_layer, const int resource_id, GPoint this_origin)
+static void set_bitmap_image(GContext *ctx, GBitmap **bmp_image, const int resource_id, GPoint this_origin, bool invert)
 {
    gbitmap_destroy(*bmp_image);
 
    *bmp_image = gbitmap_create_with_resource(resource_id);
+
    GRect frame = (GRect)
    {
       .origin = this_origin,
       .size = (*bmp_image)->bounds.size
    };
-   bitmap_layer_set_compositing_mode(bmp_layer, GCompOpAssign);
-   layer_set_frame(bitmap_layer_get_layer(bmp_layer), frame);
-   bitmap_layer_set_bitmap(bmp_layer, *bmp_image);
+
+   if (invert)
+   {
+      graphics_context_set_compositing_mode(ctx, GCompOpAssignInverted);
+   }
+   else
+   {
+      graphics_context_set_compositing_mode(ctx, GCompOpAssign);
+   }
+
+   graphics_draw_bitmap_in_rect(ctx, *bmp_image, frame);
+
+   layer_mark_dirty(window_layer);
 }  // set_bitmap_image()
 
 
@@ -1521,9 +871,6 @@ static void up_single_click_handler(ClickRecognizerRef recognizer, void *context
 
             // save local_index into persistent storage
             persist_write_int(PKEY_LOCAL_INDEX, local_index);
-
-            local_offset_hours = timezones[local_index].offset_hours;
-            local_offset_mins = timezones[local_index].offset_mins;
          }
 
          setmode_timer = SETMODE_SECONDS;
@@ -1536,9 +883,6 @@ static void up_single_click_handler(ClickRecognizerRef recognizer, void *context
 
             // save tz1_index into persistent storage
             persist_write_int(PKEY_TZ1_INDEX, tz1_index);
-
-            tz1_offset_hours = timezones[tz1_index].offset_hours;
-            tz1_offset_mins = timezones[tz1_index].offset_mins;
          }
 
          setmode_timer = SETMODE_SECONDS;
@@ -1551,9 +895,6 @@ static void up_single_click_handler(ClickRecognizerRef recognizer, void *context
 
             // save tz2_index into persistent storage
             persist_write_int(PKEY_TZ2_INDEX, tz2_index);
-
-            tz2_offset_hours = timezones[tz2_index].offset_hours;
-            tz2_offset_mins = timezones[tz2_index].offset_mins;
          }
 
          setmode_timer = SETMODE_SECONDS;
@@ -1566,9 +907,6 @@ static void up_single_click_handler(ClickRecognizerRef recognizer, void *context
 
             // save tz3_index into persistent storage
             persist_write_int(PKEY_TZ3_INDEX, tz3_index);
-
-            tz3_offset_hours = timezones[tz3_index].offset_hours;
-            tz3_offset_mins = timezones[tz3_index].offset_mins;
          }
 
          setmode_timer = SETMODE_SECONDS;
@@ -1580,63 +918,41 @@ static void up_single_click_handler(ClickRecognizerRef recognizer, void *context
 }  // up_single_click_handler()
 
 
-static void update_display(struct tm *current_time)
+static void update_display(Layer *layer, GContext *ctx)
 {
-   toggle_flag = !toggle_flag;
+   time_t t = time(NULL);
+   struct tm *time_now = localtime(&t);
 
-   current_time->tm_min -= local_offset_mins;
-
-   if (current_time->tm_min < 0)
+   if (splash_timer > 0)
    {
-      current_time->tm_min += 60;
-
-      current_time->tm_hour -= 1;
-   }
-   else
-   {
-      if (current_time->tm_min >= 60)
+      if ((time_now->tm_hour < 6) || (time_now->tm_hour > 18))
       {
-         current_time->tm_min %= 60;
-
-         current_time->tm_hour += 1;
-      }
-   }
-
-   current_time->tm_hour -= local_offset_hours;
-
-   if (current_time->tm_hour < 0)
-   {
-      current_time->tm_hour += 24;
-   }
-   else
-   {
-      if (current_time->tm_hour >= 24)
-      {
-         current_time->tm_hour %= 24;
-      }
-   }
-
-    if (splash_timer == 0)
-    {
-      if (display_is_local == true)
-      {
-         display_local();
+         set_bitmap_image(ctx, &splash_image, RESOURCE_ID_IMAGE_SPLASH, GPoint(0, 0), true);
       }
       else
       {
-         display_tz1();
+         set_bitmap_image(ctx, &splash_image, RESOURCE_ID_IMAGE_SPLASH, GPoint(0, 0), false);
+      }
+      return;
+   }
+
+   toggle_flag = !toggle_flag;
+
+   if (splash_timer == 0)
+   {
+      if (display_is_local == true)
+      {
+         display_time(ctx, 20, 1, local_index);
+      }
+      else
+      {
+         display_time(ctx, 20, 1, tz1_index);
       }
 
-      display_tz2();
-      display_tz3();
-    }
+      display_time(ctx, 76, 2, tz2_index);
+      display_time(ctx, 132, 3, tz3_index);
+   }
 
-   current_time_local = *current_time;
-   current_time1 = *current_time;
-   current_time2 = *current_time;
-   current_time3 = *current_time;
-
-   Layer *window_layer = window_get_root_layer(window);
    layer_mark_dirty(window_layer);
 }  // update_display()
 
